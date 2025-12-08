@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome - MomentumScout</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-900 text-gray-100 flex flex-col items-center justify-center min-h-screen">
+  <div class="bg-gray-800 border border-gray-700 rounded-2xl shadow-lg p-10 text-center max-w-lg">
+    <h1 class="text-4xl font-bold text-green-400 mb-4">Welcome to MomentumScout</h1>
+    <p id="welcomeName" class="text-xl text-gray-300 mb-6"></p>
+
+    <p class="text-gray-400 mb-6">
+      🎉 Thank you for requesting demo access!  
+      Our team will review your request and verify your details shortly.
+    </p>
+    <p class="text-gray-400 mb-8">
+      Once approved, you’ll gain access to our AI-powered player scouting dashboard.
+    </p>
+
+    <a href="dashboard_main.html"
+       class="inline-block px-8 py-3 bg-green-500 hover:bg-green-400 text-gray-900 font-semibold rounded-full transition duration-200">
+       Go to Dashboard
+    </a>
+
+    <p class="text-sm text-gray-500 mt-6">If your access hasn’t been approved yet, this page will remain limited.</p>
+  </div>
+
+  <script>
+    // Display the user’s name from query param
+    const params = new URLSearchParams(window.location.search);
+    const name = params.get("name") || "there";
+    document.getElementById("welcomeName").innerText = `Hi ${name},`;
+  </script>
+</body>
+</html>

@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>MomentumScout V1 — Club & Agent Dashboard</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- Chart.js for Analytics Tab -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script> 
+
+<style>
+  body { font-family: 'Inter', sans-serif; background:#0d1117; color:#c9d1d9; }
+  .attribute-slider { -webkit-appearance:none; appearance:none; width:100%; height:8px; background:#21262d; outline:none; border-radius:6px; transition:opacity .12s; }
+  .attribute-slider:hover { opacity:1; }
+  .attribute-slider::-webkit-slider-thumb { -webkit-appearance:none; width:16px; height:16px; background:#22c55e; border-radius:50%; cursor:pointer; }
+  .modal { display:none; position:fixed; inset:0; z-index:50; background:rgba(2,6,23,0.8); overflow:auto; }
+  .spinner { border:4px solid rgba(255,255,255,0.15); border-top:4px solid #22c55e; border-radius:50%; width:40px; height:40px; animation:spin 1s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .top-five { box-shadow:0 8px 30px rgba(250,204,21,0.08); border:2px solid #facc15; transform:scale(1.02); }
+  .fade-in { animation: fadeIn .24s ease-in-out both; }
+  .value-input { background:#111827; border:1px solid #374151; padding:8px; border-radius:6px; width:100%; color:#c9d1d9; }
+  
+  /* Tab Styles */
+  .tab-button { transition: background 0.2s, color 0.2s; border-bottom: 2px solid transparent; }
+  .tab-button.active { background:#22c55e; color:#0d1117; font-weight:700; border-radius: 6px 6px 0 0; }
+  .tab-pane { min-height: 400px; }
+  
+  /* Reporting Styles */
+  table.stats-table th, table.stats-table td { border-bottom:1px solid #1f2937; padding:8px 0; font-size:0.875rem; }
+  table.stats-table th { text-align:left; color:#a1a1aa; font-weight:400; }
+  table.projection-table { width:100%; border-collapse:collapse; margin-top:8px; }
+  table.projection-table th, table.projection-table td { border:1px solid #2b3138; padding:6px; text-align:center; font-size:0.9rem; }
+  table.projection-table th { color:#facc15; background:#0f1724; }
+  
+  .ai-suggestion { border-left:4px solid #facc15; background:#111827; padding:12px; border-radius:8px; }
+  .report-box { background:#1f2937; padding:15px; border-radius:8px; margin-top:10px; border: 1px solid #374151; }
+  .chart-container { position: relative; height: 300px; width: 100%; }
+</style>
+</head>
+<body class="min-h-screen p-6">
+
+<script>
+  const pwd = prompt("Enter access code:");
+  if (pwd !== "SCOUT2025") { alert("Access denied."); window.location.href = "/index.html"; } 
+</script>
+
+<!-- Player Modal (Shared across tabs) -->
+<div id="playerModal" class="modal">
+  <div class="max-w-4xl mx-auto mt-12 bg-gray-800 rounded-xl p-6 relative shadow-2xl border border-gray-700">
+    <button id="closeModal" class="absolute top-4 right-4 text-gray-300 hover:text-white text-3xl">&times;</button>
+    <div id="modalInner"></div>
+  </div>
+</div>
+
+<div class="max-w-7xl mx-auto space-y-6">
+
+  <header class="text-center mb-8">
+    <h1 class="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-teal-500">MomentumScout V1 Pro</h1>
+    <p class="text-gray-400 mt-2 text-lg">Club & Agent Intelligence Dashboard: Scout. Analyze. Win.</p>
+  </header>
+
+  <!-- SEARCH SECTION (Your Original Global Search) -->
+  <section class="bg-gray-800 border border-gray-700 rounded-xl p-6 shadow-lg">
+    <div class="flex flex-col md:flex-row gap-4 items-center">
+      <div class="flex-grow w-full">
+          <input id="playerNameSearch" class="w-full rounded-md p-3 bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-green-500" placeholder="Search player database (e.g. Lionel Messi)...">
+      </div>
+      <button id="searchPlayerBtn" class="px-6 py-3 bg-green-500 hover:bg-green-600 rounded-md text-gray-900 font-bold transition w-full md:w-auto">Search</button>
+    </div>
+    <div id="searchStatus" class="mt-2 text-sm text-gray-400 hidden ml-1"></div>
+    <!-- Search Results Container -->
+    <div id="playerSearchResults" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6"></div>
+  </section>
+
+  <!-- NAVIGATION TABS (V1 Enhancement) -->
+  <div class="flex border-b border-gray-700 overflow-x-auto space-x-1">
+    <button class="tab-button active px-6 py-3 text-gray-300 hover:text-white" data-tab="scouting">Scouting Profile</button>
+    <button class="tab-button px-6 py-3 text-gray-300 hover:text-white" data-tab="squad">Squad Analyzer</button>
+    <button class="tab-button px-6 py-3 text-gray-300 hover:text-white" data-tab="targets">Transfer Targets</button>
+    <button class="tab-button px-6 py-3 text-gray-300 hover:text-white" data-tab="analytics" id="analyticsTab">Player Analytics</button>
+  </div>
+
+  <!-- TAB CONTENT CONTAINER -->
+  <div id="tabContentContainer">
+
+    <!-- TAB 1: SCOUTING PROFILE (Your Original Core Logic) -->
+    <section id="scouting" class="tab-pane active bg-gray-800 border border-gray-700 rounded-b-xl rounded-tr-xl p-6">
+        <div class="flex flex-col md:flex-row items-center justify-between mb-6">
+            <h2 class="text-2xl font-semibold text-green-400">Deep Scouting Filters</h2>
+            <div class="flex gap-3 mt-4 md:mt-0">
+                <button id="resetBtn" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md font-medium transition">Reset All</button>
+                <button id="findPlayersBtn" class="px-6 py-2 bg-green-500 hover:bg-green-600 rounded-md text-gray-900 font-bold shadow-lg transition transform hover:scale-105">Find Top Players</button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <!-- Col 1: Core Filters -->
+            <div class="bg-gray-900/50 p-4 rounded-lg">
+                <label class="block text-sm font-bold text-gray-300 mb-2">Target Position</label>
+                <select id="position" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 text-white mb-6 focus:ring-2 focus:ring-green-500"></select>
+                <div class="space-y-4" id="coreSliders"></div>
+            </div>
+
+            <!-- Col 2: Dynamic Position Metrics -->
+            <div class="bg-gray-900/50 p-4 rounded-lg">
+                <h4 class="text-sm font-bold text-gray-300 mb-4">Position Metrics (Min 0-99)</h4>
+                <div id="dynamicMetrics" class="space-y-4 max-h-96 overflow-y-auto pr-2"></div>
+            </div>
+
+            <!-- Col 3: Weighted Desire -->
+            <div class="bg-gray-900/50 p-4 rounded-lg">
+                <h4 class="text-sm font-bold text-gray-300 mb-4">Attribute Weighting (Desire 0-100)</h4>
+                <div id="weightingSliders" class="space-y-4 max-h-96 overflow-y-auto pr-2"></div>
+            </div>
+        </div>
+
+        <!-- SHARED RESULTS SECTION (Lives inside Tab 1 for flow) -->
+        <div id="resultsSection" class="mt-10 border-t border-gray-700 pt-8">
+            <h3 class="text-2xl font-semibold text-green-400 text-center mb-6">Top Player Recommendations</h3>
+            <div class="flex justify-center">
+              <div id="loadingIndicator" class="hidden"><div class="spinner"></div></div>
+            </div>
+            <div id="recommendations" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+            <div id="noResults" class="text-center text-gray-400 mt-4 hidden">No players found matching your criteria. Try adjusting sliders.</div>
+        </div>
+    </section>
+
+    <!-- TAB 2: SQUAD ANALYZER (V1 Feature) -->
+    <section id="squad" class="tab-pane hidden bg-gray-800 border border-gray-700 rounded-b-xl rounded-tr-xl p-6">
+        <h2 class="text-2xl font-semibold text-green-400 mb-4">Squad Gap Analysis</h2>
+        <p class="text-gray-400 mb-6">Upload your current squad CSV to identify attribute deficits compared to league averages.</p>
+        
+        <div class="flex flex-col md:flex-row gap-8">
+            <div class="w-full md:w-1/2 space-y-6">
+                <div class="bg-gray-900 p-4 rounded-lg border border-gray-600">
+                    <h3 class="font-bold text-white mb-2">1. Upload Squad Data</h3>
+                    <input type="file" id="squadFileInput" accept=".csv" class="value-input w-full" />
+                    <p class="text-xs text-gray-500 mt-1">Required Columns: Name, Position, Overall, Pace, etc.</p>
+                </div>
+                
+                <div class="bg-gray-900 p-4 rounded-lg border border-gray-600">
+                    <h3 class="font-bold text-white mb-2">2. Analysis Scope</h3>
+                    <select id="squadPositionSelect" class="value-input w-full mb-3">
+                        <option value="ALL">Full Squad Audit</option>
+                        <!-- Options populated via JS -->
+                    </select>
+                    <button id="analyzeSquadBtn" class="w-full py-3 bg-yellow-600 hover:bg-yellow-700 rounded-md text-white font-bold transition">
+                        Run AI Gap Analysis
+                    </button>
+                </div>
+            </div>
+            
+            <div class="w-full md:w-1/2">
+                <h3 class="font-bold text-green-400 mb-2">AI Gap Report</h3>
+                <div id="gapAnalysisResults" class="h-96 overflow-y-auto space-y-3 p-4 bg-gray-900 rounded-lg border border-gray-600">
+                    <p class="text-gray-500 text-sm text-center mt-10">Waiting for squad data...</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- TAB 3: TRANSFER TARGETS (V1 Feature) -->
+    <section id="targets" class="tab-pane hidden bg-gray-800 border border-gray-700 rounded-b-xl rounded-tr-xl p-6">
+        <h2 class="text-2xl font-semibold text-green-400 mb-4">Budget & Contract Targeting</h2>
+        
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-8">
+            <!-- Sidebar Controls -->
+            <div class="md:col-span-4 space-y-6">
+                <div class="bg-gray-900 p-4 rounded-lg border border-gray-600 space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-1">Max Annual Wage (£)</label>
+                        <input type="number" id="maxWage" value="500000" class="value-input" />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-1">Contract Expiring By (Year)</label>
+                        <input type="number" id="contractYear" value="2026" class="value-input" />
+                    </div>
+                    <button id="targetPlayersBtn" class="w-full py-3 bg-green-500 hover:bg-green-600 rounded-md text-gray-900 font-bold transition">
+                        Find Targets
+                    </button>
+                </div>
+                
+                <div class="ai-suggestion">
+                    <p class="text-sm font-bold text-yellow-400 mb-1">AI Agent Note:</p>
+                    <p class="text-xs text-gray-300">Targeting players with < 12 months on their contract significantly lowers transfer fee leverage.</p>
+                </div>
+            </div>
+            
+            <!-- Results List -->
+            <div class="md:col-span-8">
+                <h3 class="font-bold text-gray-300 mb-2">Recommended Targets</h3>
+                <div id="targetResults" class="h-[500px] overflow-y-auto space-y-2 p-4 bg-gray-900 rounded-lg border border-gray-600">
+                    <p class="text-gray-500 text-sm text-center mt-10">Set parameters to scan the market...</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- TAB 4: PLAYER ANALYTICS (Deep Dive) -->
+    <section id="analytics" class="tab-pane hidden bg-gray-800 border border-gray-700 rounded-b-xl rounded-tr-xl p-6">
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-semibold text-green-400" id="analyticsHeader">Player Analytics</h2>
+            <button id="backToScouting" class="text-sm text-gray-400 hover:text-white border border-gray-600 px-3 py-1 rounded">
+                &larr; Back to Scouting
+            </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <!-- Column 1 & 2: Visuals & Data -->
+            <div class="md:col-span-2 space-y-6">
+                <!-- Radar Chart -->
+                <div class="bg-gray-900 p-4 rounded-lg border border-gray-600 chart-container">
+                    <canvas id="performanceChart"></canvas>
+                </div>
+                
+                <!-- Detailed Stats Table -->
+                <div class="bg-gray-900 p-4 rounded-lg border border-gray-600">
+                    <h3 class="font-bold text-gray-300 mb-4 border-b border-gray-700 pb-2">Full Attribute Breakdown</h3>
+                    <div id="detailedStatsTable" class="max-h-60 overflow-y-auto"></div>
+                </div>
+            </div>
+            
+            <!-- Column 3: MomentumAI Intelligence Reports -->
+            <div class="md:col-span-1 space-y-4">
+                <h3 class="text-lg font-bold text-green-400">MomentumAI Reports</h3>
+                <div id="trainingRegime" class="space-y-4">
+                    <!-- Report 1: Trajectory -->
+                    <div class="report-box border-l-4 border-blue-500">
+                        <h5 class="font-bold text-white text-sm">1. Trajectory Analysis</h5>
+                        <p class="text-xs text-gray-500 mt-2">Select a player to generate report...</p>
+                    </div>
+                </div>
+                
+                <button class="w-full py-3 bg-teal-600 hover:bg-teal-700 rounded-md text-white font-bold shadow-lg mt-6">
+                    Generate Agent Email
+                </button>
+            </div>
+        </div>
+    </section>
+    
+  </div> <!-- End Tab Content -->
+
+</div>
+
+<script>
+/* ------------- CONFIGURATION ------------- */
+const BACKEND_BASE = "https://momentumai-backend-g1ov.onrender.com/api"; 
+const DEFAULT_VALUE_MIN = 100000;
+const DEFAULT_VALUE_MAX = 50000000;
+let currentChart = null; 
+
+/* ------------- GLOBAL ELEMENTS ------------- */
+let posSelect, coreSliders, dynMetrics, weightContainer, recommendations, loadingIndicator;
+let playerSearchResults, searchStatus, noResults, modal, modalInner, closeModal;
+let findBtn, resetBtn, searchBtn, analyzeSquadBtn, targetPlayersBtn, squadPositionSelect;
+let detailedStatsTable, trainingRegime;
+
+/* --- HELPER FUNCTIONS --- */
+function niceName(key){ return key.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); }
+function fmtGBPFromEur(eur){ if (!eur) return '£0.0M'; const gbp = eur * 0.85; if (gbp >= 1_000_000) return `£${(gbp/1_000_000).toFixed(2)}M`; return `£${(gbp/1000).toFixed(0)}k`; }
+
+async function safePost(endpoint, body){
+  try {
+    const resp = await fetch(BACKEND_BASE + endpoint, { method:'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), mode: 'cors' });
+    if (!resp.ok) throw new Error(`Backend Status ${resp.status}`);
+    return await resp.json();
+  } catch(err) { console.error(err); throw err; }
+}
+
+/* --- TAB LOGIC --- */
+function switchTab(targetId) {
+    const tabs = document.querySelectorAll('.tab-button');
+    const tabPanes = document.querySelectorAll('.tab-pane');
+
+    tabs.forEach(t => t.classList.remove('active'));
+    tabPanes.forEach(p => p.classList.add('hidden'));
+
+    const activeBtn = document.querySelector(`[data-tab="${targetId}"]`);
+    if(activeBtn) activeBtn.classList.add('active');
+    
+    const targetPane = document.getElementById(targetId);
+    if(targetPane) targetPane.classList.remove('hidden');
+    
+    // Hide analytics unless explicitly active
+    if (targetId !== 'analytics') document.getElementById('analytics').classList.add('hidden');
+}
+
+/* --- INIT LOGIC (Boot) --- */
+function setupEventListeners() {
+    closeModal.addEventListener('click', ()=> modal.style.display='none');
+    window.addEventListener('click', (e)=> { if (e.target === modal) modal.style.display='none'; });
+
+    document.querySelectorAll('.tab-button').forEach(tab => {
+        tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+    });
+    
+    // Buttons
+    findBtn.onclick = handleFindPlayers;
+    searchBtn.onclick = handleSearchPlayers;
+    resetBtn.onclick = resetAll;
+    analyzeSquadBtn.onclick = handleSquadAnalysis;
+    targetPlayersBtn.onclick = handleBudgetTargeting;
+    
+    // Dynamic UI
+    posSelect.addEventListener('change', updateUIAfterPositionChange);
+}
+
+function fullBoot(){
+    // Assign DOM elements
+    posSelect = document.getElementById('position');
+    coreSliders = document.getElementById('coreSliders');
+    dynMetrics = document.getElementById('dynamicMetrics');
+    weightContainer = document.getElementById('weightingSliders');
+    recommendations = document.getElementById('recommendations');
+    loadingIndicator = document.getElementById('loadingIndicator');
+    playerSearchResults = document.getElementById('playerSearchResults');
+    searchStatus = document.getElementById('searchStatus');
+    noResults = document.getElementById('noResults');
+    modal = document.getElementById('playerModal');
+    modalInner = document.getElementById('modalInner');
+    closeModal = document.getElementById('closeModal');
+    findBtn = document.getElementById('findPlayersBtn');
+    resetBtn = document.getElementById('resetBtn');
+    searchBtn = document.getElementById('searchPlayerBtn');
+    analyzeSquadBtn = document.getElementById('analyzeSquadBtn');
+    targetPlayersBtn = document.getElementById('targetPlayersBtn');
+    squadPositionSelect = document.getElementById('squadPositionSelect');
+    detailedStatsTable = document.getElementById('detailedStatsTable');
+    trainingRegime = document.getElementById('trainingRegime');
+
+    populatePositions();
+    setupEventListeners();
+    buildCoreSliders();
+    updateUIAfterPositionChange();
+}
+
+/* --- CORE FUNCTIONS --- */
+const POSITIONS = ['GK','CB','LB','RB','CDM','CM','CAM','RW','LW','CF','ST'];
+const POSITION_METRICS = {
+  'GK': { display:['goalkeeping_diving','goalkeeping_handling','goalkeeping_kicking','goalkeeping_positioning','goalkeeping_reflexes'], weights:['goalkeeping_diving','goalkeeping_handling','goalkeeping_kicking','goalkeeping_positioning','goalkeeping_reflexes'] },
+  'CB': { display:['defending_marking_awareness','defending_standing_tackle','defending_sliding_tackle','power_strength','power_jumping','mentality_interceptions','pace','passing'], weights:['defending_standing_tackle', 'defending_marking_awareness', 'power_strength', 'mentality_interceptions', 'pace', 'passing'] },
+  'LB': { display:['defending_marking_awareness','defending_standing_tackle','defending_sliding_tackle','pace','passing','attacking_crossing'], weights:['pace','passing','defending_standing_tackle', 'attacking_crossing'] },
+  'RB': { display:['defending_marking_awareness','defending_standing_tackle','defending_sliding_tackle','pace','passing','attacking_crossing'], weights:['pace','passing','defending_standing_tackle', 'attacking_crossing'] },
+  'CDM':{ display:['defending_standing_tackle','mentality_interceptions','passing','physic','power_stamina','power_strength','mentality_vision'], weights:['pace','passing','defending_standing_tackle','physic', 'mentality_interceptions'] },
+  'CM': { display:['passing','dribbling','shooting','defending','power_stamina','mentality_vision','skill_long_passing','skill_ball_control'], weights:['pace','passing','dribbling','defending','physic'] },
+  'CAM':{ display:['passing','dribbling','shooting','mentality_vision','skill_curve','skill_fk_accuracy','movement_agility'], weights:['pace','shooting','passing','dribbling', 'mentality_vision'] },
+  'RW': { display:['pace','dribbling','shooting','passing','movement_acceleration','movement_sprint_speed','attacking_crossing','skill_ball_control'], weights:['pace','shooting','passing','dribbling', 'attacking_crossing'] },
+  'LW': { display:['pace','dribbling','shooting','passing','movement_acceleration','movement_sprint_speed','attacking_crossing','skill_ball_control'], weights:['pace','shooting','passing','dribbling', 'attacking_crossing'] },
+  'CF': { display:['shooting','dribbling','passing','mentality_positioning','attacking_finishing','power_shot_power'], weights:['pace','shooting','passing','dribbling', 'mentality_positioning'] },
+  'ST': { display:['shooting','pace','dribbling','attacking_finishing','power_shot_power','power_strength','movement_acceleration', 'mentality_positioning'], weights:['pace','shooting','dribbling', 'mentality_positioning', 'attacking_finishing'] }
+};
+
+function populatePositions(){
+  POSITIONS.forEach(p=>{
+    const opt = document.createElement('option'); opt.value = p; opt.textContent = p; posSelect.appendChild(opt);
+    const sOpt = document.createElement('option'); sOpt.value = p; sOpt.textContent = p; squadPositionSelect.appendChild(sOpt);
+  });
+}
+
+function buildCoreSliders() {
+  coreSliders.innerHTML = ''; 
+  coreSliders.insertAdjacentHTML('beforeend', createSlider('Overall', 50, 99, 75, 95));
+  coreSliders.insertAdjacentHTML('beforeend', createSlider('Age', 16, 45, 20, 30));
+  coreSliders.insertAdjacentHTML('beforeend', createValueInputBlock('Value', DEFAULT_VALUE_MIN, DEFAULT_VALUE_MAX));
+  setupSliderListeners(); setupValueInputListeners();
+}
+
+function createSlider(attr, min, max, valMin, valMax) {
+  return `<div class="mb-4"><label class="block text-sm mb-1 font-medium">${attr}: <span id="${attr}Val">${valMin} - ${valMax}</span></label><input id="${attr}_min" type="range" min="${min}" max="${max}" value="${valMin}" class="attribute-slider mb-2"><input id="${attr}_max" type="range" min="${min}" max="${max}" value="${valMax}" class="attribute-slider"></div>`;
+}
+
+function createValueInputBlock(attr, valMin, valMax) {
+  return `<div class="mb-4 fade-in"><label class="block text-sm mb-1 font-medium">${attr} (GBP):</label><div class="grid grid-cols-2 gap-2"><input id="${attr}_min" type="number" value="${valMin}" class="value-input"><input id="${attr}_max" type="number" value="${valMax}" class="value-input"></div></div>`;
+}
+
+function setupSliderListeners() {
+  document.querySelectorAll('input[type="range"]').forEach(sl => {
+    sl.oninput = () => {
+      if (sl.id.includes('w_')) { document.getElementById(sl.id + '_val').textContent = sl.value; }
+      else {
+        const base = sl.id.replace('_min','').replace('_max','');
+        const min = document.getElementById(base + '_min').value; const max = document.getElementById(base + '_max').value;
+        document.getElementById(base + 'Val').textContent = `${min} - ${max}`;
+      }
+    };
+  });
+}
+function setupValueInputListeners() {} // No realtime update needed for inputs
+
+function buildPositionMetrics(pos){
+  dynMetrics.innerHTML = '';
+  (POSITION_METRICS[pos]?.display || []).forEach(m => dynMetrics.insertAdjacentHTML('beforeend', sliderBlock(m,0,99,50,75)));
+}
+function buildWeightSliders(pos){
+  weightContainer.innerHTML = '<div class="text-sm text-gray-300 mb-2">Adjust search focus (0-100).</div>';
+  (POSITION_METRICS[pos]?.weights || []).forEach(w => weightContainer.insertAdjacentHTML('beforeend', weightBlock(w,50)));
+}
+function sliderBlock(id, min, max, vMin, vMax){
+  return `<div class="fade-in"><label class="block text-sm mb-1">${niceName(id)}: <span id="${id}Val" class="text-gray-300">50 - 99</span></label><input id="${id}_min" class="attribute-slider mb-2" type="range" min="0" max="99" value="50"><input id="${id}_max" class="attribute-slider" type="range" min="0" max="99" value="99"></div>`;
+}
+function weightBlock(attr, initial){
+  return `<div class="fade-in"><label class="block text-sm mb-1">${niceName(attr)} Desire: <span id="w_${attr}_val" class="text-gray-300">${initial}</span></label><input id="w_${attr}" class="attribute-slider" type="range" min="0" max="100" value="${initial}"></div>`;
+}
+function attachSliderListeners(){ setupSliderListeners(); }
+function updateUIAfterPositionChange() { buildPositionMetrics(posSelect.value); buildWeightSliders(posSelect.value); attachSliderListeners(); }
+function resetAll(){ buildCoreSliders(); updateUIAfterPositionChange(); }
+
+
+/* --- LOGIC HANDLERS --- */
+
+function handleSearchPlayers() {
+  const q = playerNameSearch.value.trim();
+  if (!q) return;
+  playerSearchResults.innerHTML = ''; searchStatus.classList.remove('hidden'); searchStatus.textContent = 'Searching...';
+  safePost('/search_player', { player_name: q }).then(data => {
+      searchStatus.textContent = (!data || !data.length) ? 'No results found.' : `${data.length} player(s) found`;
+      data?.forEach(pl => playerSearchResults.appendChild(renderPlayerCard(pl, 999)));
+  }).catch(e => searchStatus.textContent = 'Error.');
+}
+
+function handleFindPlayers() {
+  recommendations.innerHTML = ''; noResults.classList.add('hidden'); loadingIndicator.classList.remove('hidden');
+  const body = { position: posSelect.value, filters:{}, weights:{}, data_source: 'base' };
+  
+  // Scrape core sliders
+  body.filters['Overall'] = [Number(document.getElementById('Overall_min').value), Number(document.getElementById('Overall_max').value)];
+  body.filters['Age'] = [Number(document.getElementById('Age_min').value), Number(document.getElementById('Age_max').value)];
+  body.filters['Value'] = [Number(document.getElementById('Value_min').value), Number(document.getElementById('Value_max').value)];
+
+  // Scrape dynamic metric sliders
+  document.querySelectorAll('#dynamicMetrics input').forEach(sl=>{
+      const base = sl.id.replace('_min','').replace('_max','');
+      if (sl.id.endsWith('_min')) body.filters[base] = [Number(document.getElementById(base+'_min').value), Number(document.getElementById(base+'_max').value)];
+  });
+  // Scrape weights
+  document.querySelectorAll('#weightingSliders input').forEach(sl => body.weights[sl.id.replace('w_','')] = Number(sl.value));
+
+  safePost('/find_players', body).then(data => {
+      loadingIndicator.classList.add('hidden');
+      if (!data?.players?.length) return noResults.classList.remove('hidden');
+      data.players.slice(0,5).forEach((p,i) => recommendations.appendChild(renderPlayerCard(p,i)));
+  }).catch(() => { loadingIndicator.classList.add('hidden'); noResults.classList.remove('hidden'); });
+}
+
+function renderPlayerCard(player, rankIndex) {
+  const card = document.createElement('div');
+  card.className = 'bg-gray-800 p-4 rounded-xl border border-gray-700 hover:scale-105 transition-transform cursor-pointer';
+  const name = player.short_name || 'Unknown';
+  card.innerHTML = `<div class="flex items-center gap-3"><img src="${player.player_face_url}" class="w-20 h-20 rounded-full border-2 border-green-500 object-cover"><div class="flex-1"><div class="flex justify-between"><div class="lg font-semibold text-green-300">${name}</div><div class="lg font-bold">${fmtGBPFromEur(player.value_eur)}</div></div><div class="text-sm text-gray-400">${player.club_position} • OVR ${player.overall}</div><div class="text-xs text-gray-500 mt-2">Click for Analytics</div></div></div>`;
+  card.addEventListener('click', () => loadPlayerDetails(player));
+  return card;
+}
+
+function loadPlayerDetails(player) {
+    switchTab('analytics');
+    document.getElementById('analyticsHeader').textContent = `${player.short_name} - Analytics`;
+    
+    // Stats Table
+    let tableHtml = '<table class="stats-table w-full"><tbody>';
+    Object.entries(player.full_attributes || {}).forEach(([k, v]) => {
+        if(typeof v !== 'object') tableHtml += `<tr><th>${k.replace(/_/g,' ')}</th><td>${v}</td></tr>`;
+    });
+    tableHtml += '</tbody></table>';
+    document.getElementById('detailedStatsTable').innerHTML = tableHtml;
+
+    // AI Reports (Using data from backend)
+    const aiPlan = player.ai_training || { weakness: 'General', drills: [] };
+    const injuryRisk = (player.full_attributes?.Physicality < 65) ? "MODERATE" : "LOW";
+    const projText = (player.projections && player.projections[2] && player.projections[2].projected_overall > player.overall) ? "High Upside: + Growth Predicted" : "Stable: Peak Performance";
+
+    document.getElementById('trainingRegime').innerHTML = `
+        <div class="report-box border-l-4 border-blue-500"><h5 class="font-bold text-white text-sm">Trajectory Analysis</h5><p class="text-xs text-gray-400 mt-1">${projText}</p></div>
+        <div class="report-box border-l-4 border-yellow-500"><h5 class="font-bold text-white text-sm">Performance Plan</h5><p class="text-xs text-yellow-400 mt-1">${aiPlan.weakness}</p><ul class="list-disc list-inside text-xs text-gray-400 ml-2 mt-1">${aiPlan.drills.map(d=>`<li>${d}</li>`).join('')}</ul></div>
+        <div class="report-box border-l-4 border-red-500"><h5 class="font-bold text-white text-sm">Injury Risk</h5><p class="text-xs text-${injuryRisk==='LOW'?'green':'red'}-400 mt-1">Risk Status: ${injuryRisk}</p></div>
+    `;
+
+    // Chart
+    const data = [player.full_attributes?.Pace||50, player.full_attributes?.Shooting||50, player.full_attributes?.Passing||50, player.full_attributes?.Dribbling||50, player.full_attributes?.Defending||50, player.full_attributes?.Physicality||50];
+    if (currentChart) currentChart.destroy();
+    const ctx = document.getElementById('performanceChart').getContext('2d');
+    currentChart = new Chart(ctx, { type: 'radar', data: { labels: ['PAC','SHO','PAS','DRI','DEF','PHY'], datasets: [{ label: player.short_name, data: data, backgroundColor: 'rgba(34, 197, 94, 0.2)', borderColor: '#22c55e', pointBackgroundColor: '#fff' }] }, options: { scales: { r: { suggestedMin: 30, suggestedMax: 100, grid: { color: '#374151' }, pointLabels: { color: '#fff' } } }, plugins: { legend: { labels: { color: '#fff' } } } } });
+}
+
+/* --- V1 Handlers --- */
+async function handleSquadAnalysis() {
+    const file = document.getElementById('squadFileInput').files[0];
+    const resDiv = document.getElementById('gapAnalysisResults');
+    if (!file) { alert("Upload CSV."); return; }
+    resDiv.innerHTML = '<p class="text-gray-400">Analyzing...</p>';
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        const data = await safePost('/squad_gap_analysis', { csv_data: e.target.result, position: squadPositionSelect.value });
+        resDiv.innerHTML = (data?.suggestions || []).map(s => `<div class="p-2 bg-gray-900 border-l-2 border-yellow-500 text-xs text-gray-300 mb-2">${s}</div>`).join('');
+    };
+    reader.readAsText(file);
+}
+
+async function handleBudgetTargeting() {
+    const wage = document.getElementById('maxWage').value;
+    const year = document.getElementById('contractYear').value;
+    const list = document.getElementById('targetResults');
+    list.innerHTML = '<p class="text-gray-400">Scanning...</p>';
+    const data = await safePost('/budget_target', { max_wage: wage, contract_year: year });
+    if (data?.targets?.length) {
+        list.innerHTML = data.targets.map(p => `<div class="flex justify-between items-center p-2 bg-gray-900 rounded border border-gray-700 mb-2"><div><div class="text-sm font-bold text-green-400">${p.short_name} (${p.club_position})</div><div class="text-xs text-gray-500">Exp: ${p.contract_end} | ${fmtGBPFromEur(p.wage_yearly)}/yr</div></div><div class="text-lg font-bold text-white">${p.overall}</div></div>`).join('');
+    } else { list.innerHTML = '<p class="text-gray-500">No targets found.</p>'; }
+}
+
+document.addEventListener('DOMContentLoaded', fullBoot);
+</script>
+</body>
+</html>
