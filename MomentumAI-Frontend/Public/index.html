@@ -1,160 +1,380 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
+<meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MomentumScout - AI-Powered Player Scouting</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-body { font-family: 'Inter', sans-serif; }
-.gradient-bg { background: linear-gradient(90deg,#2eb872,#38b2ac); }
-.container { max-width: 900px; }
-/* Carousel */
-.carousel { position: relative; overflow: hidden; }
-.carousel-track { display: flex; transition: transform 0.5s ease-in-out; }
-.carousel-slide { min-width: 100%; flex-shrink: 0; }
-.carousel-button {
-  position: absolute; top: 50%; transform: translateY(-50%);
-  background: rgba(0,0,0,0.5); color: white; border: none;
-  padding: 0.5rem 1rem; cursor: pointer; border-radius: 5px;
-}
-.carousel-button.prev { left: 10px; }
-.carousel-button.next { right: 10px; }
+  body { font-family: 'Inter', sans-serif; scroll-behavior: smooth; }
+  .gradient-bg { background: linear-gradient(90deg,#2eb872,#38b2ac); }
+  .modal { display:none; position:fixed; inset:0; z-index:50; background:rgba(2,6,23,0.9); align-items:center; justify-content:center; }
+  .carousel { position: relative; overflow: hidden; }
+  .carousel-track { display: flex; transition: transform 0.5s ease-in-out; }
+  .carousel-slide { min-width: 100%; flex-shrink: 0; }
+  .carousel-button {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    background: rgba(0,0,0,0.5); color: white; border: none;
+    padding: 0.5rem 1rem; cursor: pointer; border-radius: 5px;
+  }
+  .carousel-button.prev { left: 10px; }
+  .carousel-button.next { right: 10px; }
 </style>
 </head>
 <body class="bg-gray-900 text-gray-100">
 
-<header class="container mx-auto px-6 py-16 text-center">
-  <h1 class="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-teal-500 mb-4">MomentumScout</h1>
-  <p class="text-gray-300 text-lg mb-8">
-    AI-Powered Player Scouting & Insights for Football Clubs, Agents, and Scouts
+<!-- Navigation Bar -->
+<nav class="container mx-auto px-6 py-4 flex justify-between items-center">
+  <div class="text-2xl font-bold text-green-400">MomentumScout</div>
+  <div class="flex gap-4">
+      <a href="#signup" class="px-5 py-2 text-white font-medium hover:text-green-400 transition">
+        Sign Up
+      </a>
+      <button onclick="openLoginModal()" class="px-5 py-2 border border-green-500 text-green-400 rounded-full hover:bg-green-500 hover:text-gray-900 transition font-medium">
+        Client Login
+      </button>
+  </div>
+</nav>
+
+<!-- Hero Section -->
+<header class="container mx-auto px-6 py-12 text-center">
+  <h1 class="text-5xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-teal-500 mb-6">
+    Scout. Analyze. Win.
+  </h1>
+  <p class="text-gray-300 text-xl mb-10 max-w-2xl mx-auto">
+    The AI-Powered Intelligence Platform for Professional Clubs, Agents, and the Baller League.
   </p>
-  <a href="#signup"
-     class="px-8 py-3 gradient-bg rounded-full text-gray-900 font-semibold hover:opacity-90 transition duration-200">
+  <a href="#signup" class="px-8 py-4 gradient-bg rounded-full text-gray-900 font-bold text-lg hover:opacity-90 transition shadow-lg transform hover:scale-105 inline-block">
      Request Demo Access
   </a>
 </header>
 
-<section class="container mx-auto px-6 py-16 grid md:grid-cols-2 gap-12">
-  <div class="space-y-6">
-    <h2 class="text-3xl font-bold text-green-400">What MomentumScout Does</h2>
-    <ul class="list-disc list-inside text-gray-300 space-y-2">
-      <li>Find top 5 player matches based on customizable scouting metrics</li>
-      <li>Project player potential & value in real-time</li>
-      <li>Exportable data for your club or agency</li>
-      <li>Interactive dashboard-style analytics</li>
-      <li>Guided scouting tool for small and large clubs alike</li>
-    </ul>
-  </div>
-  <div class="flex justify-center">
-    <img src="assets/Main Logo.png"
-         alt="MomentumScout Logo"
-         class="rounded-xl shadow-lg border border-gray-600"
-         style="width:300px;height:300px;object-fit:contain;">
-  </div>
-</section>
+<!-- Login Modal -->
+<div id="loginModal" class="modal flex">
+  <div class="bg-gray-800 p-8 rounded-xl border border-gray-600 max-w-md w-full relative shadow-2xl">
+    <button onclick="closeLoginModal()" class="absolute top-4 right-4 text-gray-400 hover:text-white text-2xl">&times;</button>
+    
+    <div id="portalSelection">
+      <h2 class="text-2xl font-bold text-center text-white mb-2">Select Your Portal</h2>
+      <p class="text-gray-400 text-center text-sm mb-8">Please select your dashboard to log in.</p>
+      
+      <div class="space-y-4">
+        <!-- Club/Agent Link -->
+        <button onclick="showAccessCodeInput('club')" class="block w-full p-4 bg-gray-700 hover:bg-gray-600 border border-gray-500 rounded-lg flex items-center gap-4 transition group text-left">
+          <div class="h-10 w-10 bg-green-500 rounded-full flex items-center justify-center text-gray-900 font-bold">P</div>
+          <div>
+            <h3 class="font-bold text-white group-hover:text-green-400">Club & Agent</h3>
+            <p class="text-xs text-gray-400">Squad Analysis, Scouting, Transfers</p>
+          </div>
+        </button>
 
-<section class="container mx-auto px-6 py-16">
-  <h2 class="text-3xl font-bold text-green-400 mb-6 text-center">Prototype Screenshots</h2>
-  <div class="carousel rounded-xl shadow-lg border border-gray-600 relative max-w-3xl mx-auto">
-    <div class="carousel-track">
-      <div class="carousel-slide">
-        <img src="assets/screenshot1.png" alt="Screenshot 1" class="w-full h-64 object-contain rounded-xl">
+        <!-- Baller League Link -->
+        <button onclick="showAccessCodeInput('baller')" class="block w-full p-4 bg-gray-700 hover:bg-gray-600 border border-yellow-600 rounded-lg flex items-center gap-4 transition group text-left">
+          <div class="h-10 w-10 bg-yellow-500 rounded-full flex items-center justify-center text-gray-900 font-bold">B</div>
+          <div>
+            <h3 class="font-bold text-white group-hover:text-yellow-400">Baller League</h3>
+            <p class="text-xs text-gray-400">Weekly Leaderboards & Stats</p>
+          </div>
+        </button>
       </div>
-      <div class="carousel-slide">
-        <img src="assets/screenshot2.png" alt="Screenshot 2" class="w-full h-64 object-contain rounded-xl">
-      </div>
-      <div class="carousel-slide">
-        <img src="assets/screenshot3.png" alt="Screenshot 3" class="w-full h-64 object-contain rounded-xl">
+      
+      <div class="mt-6 text-center text-xs text-gray-500">
+        Don't have an access code? <a href="#signup" onclick="closeLoginModal()" class="text-green-400 hover:underline">Request one here</a>.
       </div>
     </div>
-    <button class="carousel-button prev">&lt;</button>
-    <button class="carousel-button next">&gt;</button>
+
+    <div id="accessCodeSection" class="hidden">
+      <h2 class="text-xl font-bold text-center text-white mb-2">Member Login</h2>
+      <p id="portalNameDisplay" class="text-gray-400 text-center text-sm mb-6"></p>
+      
+      <div class="space-y-4">
+          <div>
+              <label class="block text-xs text-gray-400 mb-1 ml-1">Email Address</label>
+              <input type="email" id="loginEmailInput" placeholder="name@organization.com" class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 text-white focus:ring-2 focus:ring-green-500 focus:outline-none">
+          </div>
+          <div>
+              <label class="block text-xs text-gray-400 mb-1 ml-1">Access Code</label>
+              <input type="password" id="accessCodeInput" placeholder="Enter code" class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 text-white focus:ring-2 focus:ring-green-500 focus:outline-none">
+          </div>
+      </div>
+      
+      <p id="loginError" class="text-red-500 text-xs mt-4 mb-2 hidden text-center"></p>
+      
+      <button onclick="verifyAccessCode()" class="w-full py-3 gradient-bg rounded-lg text-gray-900 font-bold hover:opacity-90 transition mt-4">Login</button>
+      <button onclick="backToPortalSelection()" class="w-full mt-3 py-2 text-gray-400 hover:text-white text-sm">Back</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- Features Section (Cleaned Up) -->
+<section class="container mx-auto px-6 py-16 grid md:grid-cols-2 gap-12 items-start">
+  <div class="space-y-8">
+    <h2 class="text-4xl font-bold text-white mb-4">Why MomentumScout?</h2>
+    
+    <div class="space-y-4 text-gray-300">
+      
+      <!-- Feature Card 1 -->
+      <div class="flex items-start p-4 bg-gray-800 rounded-lg border border-gray-700 hover:border-green-500 transition shadow-sm">
+         <div class="text-green-400 mr-4 text-xl mt-1">✓</div>
+         <div>
+             <h4 class="text-lg font-semibold text-white">AI Squad Gap Analysis</h4>
+             <p class="text-sm text-gray-400">Upload your current squad data and let our AI identify critical weaknesses and position needs instantly.</p>
+         </div>
+      </div>
+
+      <!-- Feature Card 2 -->
+      <div class="flex items-start p-4 bg-gray-800 rounded-lg border border-gray-700 hover:border-green-500 transition shadow-sm">
+         <div class="text-green-400 mr-4 text-xl mt-1">✓</div>
+         <div>
+             <h4 class="text-lg font-semibold text-white">Budget Targeting</h4>
+             <p class="text-sm text-gray-400">Filter high-potential players that fit your exact wage structure and contract expiry timeline.</p>
+         </div>
+      </div>
+
+      <!-- Feature Card 3 -->
+      <div class="flex items-start p-4 bg-gray-800 rounded-lg border border-gray-700 hover:border-green-500 transition shadow-sm">
+         <div class="text-green-400 mr-4 text-xl mt-1">✓</div>
+         <div>
+             <h4 class="text-lg font-semibold text-white">Dual Database Engine</h4>
+             <p class="text-sm text-gray-400">Validated scouting data powered by FC26 attributes combined with real-world performance metrics.</p>
+         </div>
+      </div>
+
+      <!-- Feature Card 4 -->
+      <div class="flex items-start p-4 bg-gray-800 rounded-lg border border-gray-700 hover:border-green-500 transition shadow-sm">
+         <div class="text-green-400 mr-4 text-xl mt-1">✓</div>
+         <div>
+             <h4 class="text-lg font-semibold text-white">Baller League Integration</h4>
+             <p class="text-sm text-gray-400">Exclusive tracking, leaderboards, and AI insights for the UK's fastest-growing league.</p>
+         </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Logo Section -->
+  <div class="flex items-center justify-center h-full">
+     <div class="p-8 bg-gray-800/50 rounded-xl border border-gray-700/50 backdrop-blur-sm shadow-2xl">
+        <img src="assets/Main Logo.png" alt="MomentumScout Logo" class="w-full max-w-sm h-auto object-contain">
+     </div>
   </div>
 </section>
 
+<!-- Screenshots Carousel -->
+<section class="bg-gray-800 py-16">
+  <div class="container mx-auto px-6">
+    <h2 class="text-3xl font-bold text-center text-green-400 mb-10">Platform Preview</h2>
+    <!-- Carousel Container with Aspect Ratio -->
+    <div class="carousel rounded-xl shadow-2xl border border-gray-600 relative max-w-5xl mx-auto bg-gray-900" style="aspect-ratio: 16/9;">
+      <div class="carousel-track h-full">
+        <!-- Slide 0 -->
+        <div class="carousel-slide h-full w-full">
+            <img src="assets/screenshot0.png" class="w-full h-full object-contain" alt="Dashboard Overview">
+        </div>
+        <!-- Slide 1 -->
+        <div class="carousel-slide h-full w-full">
+            <img src="assets/screenshot1.png" class="w-full h-full object-contain" alt="Player Analysis">
+        </div>
+        <!-- Slide 2 -->
+        <div class="carousel-slide h-full w-full">
+            <img src="assets/screenshot2.png" class="w-full h-full object-contain" alt="Squad Gaps">
+        </div>
+        <!-- Slide 3 -->
+        <div class="carousel-slide h-full w-full">
+            <img src="assets/screenshot3.png" class="w-full h-full object-contain" alt="Baller Leaderboard">
+        </div>
+      </div>
+      
+      <button class="carousel-button prev hover:bg-gray-700 text-2xl px-4">&lt;</button>
+      <button class="carousel-button next hover:bg-gray-700 text-2xl px-4">&gt;</button>
+    </div>
+  </div>
+</section>
+
+<!-- Video Section -->
 <section class="container mx-auto px-6 py-16 text-center">
-  <h2 class="text-3xl font-bold text-green-400 mb-6">See MomentumScout in Action</h2>
-  <p class="text-gray-300 mb-6">
-    Watch a quick explainer video to understand how our AI scouting works and how it can save your club or agency hours of work.
-  </p>
-  <video controls class="mx-auto rounded-xl shadow-lg border border-gray-600 max-w-full">
-    <source src="assets/MomentumScoutAIDemo.mp4" type="video/mp4">
-    Your browser does not support the video tag.
-  </video>
-</section>
-
-<section id="signup" class="container mx-auto px-6 py-16 bg-gray-800 rounded-xl shadow-lg border border-gray-600">
-  <h2 class="text-3xl font-bold text-green-400 mb-6 text-center">Request Demo Access</h2>
-
-  <form id="demoForm" class="space-y-6 max-w-xl mx-auto">
-    <div>
-      <label for="fullName" class="block text-sm font-medium mb-2">Full Name</label>
-      <input type="text" id="fullName" name="fullName" required
-             class="w-full p-3 rounded-md bg-gray-700 border border-gray-600 text-gray-100 focus:outline-none focus:ring-2 focus:ring-green-500">
-    </div>
-    <div>
-      <label for="email" class="block text-sm font-medium mb-2">Email</label>
-      <input type="email" id="email" name="email" required
-             class="w-full p-3 rounded-md bg-gray-700 border border-gray-600 text-gray-100 focus:outline-none focus:ring-2 focus:ring-green-500">
-    </div>
-    <div>
-      <label for="organization" class="block text-sm font-medium mb-2">Club / Organization</label>
-      <input type="text" id="organization" name="organization" required
-             class="w-full p-3 rounded-md bg-gray-700 border border-gray-600 text-gray-100 focus:outline-none focus:ring-2 focus:ring-green-500">
-    </div>
-    <div class="flex items-center">
-      <input type="checkbox" id="demoAccess" required
-             class="h-5 w-5 text-green-500 bg-gray-700 border-gray-600 rounded focus:ring-green-500">
-      <label for="demoAccess" class="ml-3 text-gray-300">
-        I would like to get access to the MomentumScout prototype demo
-      </label>
-    </div>
-    <button type="submit"
-            class="w-full py-3 gradient-bg rounded-full text-gray-900 font-semibold hover:opacity-90 transition duration-200">
-            Request Access
-    </button>
-  </form>
-
-  <div id="formMessage" class="text-center mt-4 text-green-400 hidden">
-    Thank you! Your request has been submitted.
+  <h2 class="text-3xl font-bold text-white mb-6">See It In Action</h2>
+  <div class="max-w-4xl mx-auto rounded-xl overflow-hidden shadow-lg border border-gray-600">
+    <video controls class="w-full">
+      <source src="assets/MomentumScoutAIDemo.mp4" type="video/mp4">
+      Your browser does not support the video tag.
+    </video>
   </div>
 </section>
 
-<footer class="container mx-auto px-6 py-12 text-center text-gray-400">
-  &copy; 2025 MomentumScout. All rights reserved.
+<!-- Signup Form Section -->
+<section id="signup" class="container mx-auto px-6 py-20">
+  <div class="max-w-xl mx-auto bg-gray-800 p-8 rounded-2xl shadow-xl border border-gray-700">
+    <h2 class="text-3xl font-bold text-center text-green-400 mb-2">Request Access</h2>
+    <p class="text-center text-gray-400 mb-8">Sign up to receive your verified access code.</p>
+
+    <form id="demoForm" class="space-y-5">
+      <div>
+        <label for="fullName" class="block text-sm font-medium text-gray-300 mb-1">Full Name</label>
+        <input type="text" id="fullName" name="fullName" required placeholder="John Doe"
+               class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 text-white focus:ring-2 focus:ring-green-500 focus:outline-none">
+      </div>
+      
+      <div>
+        <label for="email" class="block text-sm font-medium text-gray-300 mb-1">Email Address</label>
+        <input type="email" id="email" name="email" required placeholder="john@club.com"
+               class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 text-white focus:ring-2 focus:ring-green-500 focus:outline-none">
+      </div>
+
+      <div>
+        <label for="organization" class="block text-sm font-medium text-gray-300 mb-1">Organization / Club</label>
+        <input type="text" id="organization" name="organization" required placeholder="e.g. Arsenal FC"
+               class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 text-white focus:ring-2 focus:ring-green-500 focus:outline-none">
+      </div>
+
+      <!-- Role Selector -->
+      <div>
+        <label for="role" class="block text-sm font-medium text-gray-300 mb-1">I am a...</label>
+        <select id="role" name="role" required
+               class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 text-white focus:ring-2 focus:ring-green-500 focus:outline-none">
+               <option value="" disabled selected>Select your role</option>
+               <option value="Club Director">Club Director / Scout</option>
+               <option value="Agent">Football Agent</option>
+               <option value="Baller League">Baller League (Club/Scout)</option>
+               <option value="Other">Other Position</option>
+        </select>
+      </div>
+
+      <div class="pt-2">
+        <button type="submit"
+                class="w-full py-4 gradient-bg rounded-lg text-gray-900 font-bold text-lg hover:opacity-90 transition">
+                Get Access Code
+        </button>
+      </div>
+    </form>
+
+    <div id="formMessage" class="text-center mt-6 p-4 bg-green-900/30 border border-green-500/50 rounded-lg text-green-400 hidden"></div>
+  </div>
+</section>
+
+<footer class="bg-gray-900 border-t border-gray-800 mt-12 py-12 text-center text-gray-500 text-sm">
+  &copy; 2026 MomentumScout. Powered by AI & Football Intelligence.
 </footer>
 
 <script>
-/* ---------- Carousel ---------- */
-const track = document.querySelector('.carousel-track');
-const slides = Array.from(track.children);
-const nextBtn = document.querySelector('.carousel-button.next');
-const prevBtn = document.querySelector('.carousel-button.prev');
-let index = 0;
-function updateCarousel() {
-  track.style.transform = `translateX(-${index * 100}%)`;
+/* --- Login Modal Logic --- */
+const loginModal = document.getElementById('loginModal');
+const portalSelection = document.getElementById('portalSelection');
+const accessCodeSection = document.getElementById('accessCodeSection');
+const portalNameDisplay = document.getElementById('portalNameDisplay');
+const accessCodeInput = document.getElementById('accessCodeInput');
+const loginEmailInput = document.getElementById('loginEmailInput');
+const loginError = document.getElementById('loginError');
+
+let selectedPortal = '';
+
+function openLoginModal() { 
+  loginModal.style.display = 'flex';
+  backToPortalSelection(); // Reset state
 }
-nextBtn.addEventListener('click', () => {
-  index = (index + 1) % slides.length; updateCarousel();
-});
-prevBtn.addEventListener('click', () => {
-  index = (index - 1 + slides.length) % slides.length; updateCarousel();
+
+function closeLoginModal() { 
+  loginModal.style.display = 'none'; 
+}
+
+function showAccessCodeInput(portal) {
+  selectedPortal = portal;
+  portalSelection.classList.add('hidden');
+  accessCodeSection.classList.remove('hidden');
+  accessCodeInput.value = '';
+  loginEmailInput.value = '';
+  loginError.classList.add('hidden');
+  
+  if (portal === 'club') {
+    portalNameDisplay.textContent = 'Club & Agent Portal';
+  } else {
+    portalNameDisplay.textContent = 'Baller League Portal';
+  }
+}
+
+function backToPortalSelection() {
+  accessCodeSection.classList.add('hidden');
+  portalSelection.classList.remove('hidden');
+  selectedPortal = '';
+}
+
+function verifyAccessCode() {
+  const email = loginEmailInput.value.trim();
+  const code = accessCodeInput.value.trim();
+  
+  // Basic validation
+  if (!email) {
+      loginError.textContent = 'Please enter your verified email address.';
+      loginError.classList.remove('hidden');
+      return;
+  }
+  
+  if (!code) {
+      loginError.textContent = 'Please enter your access code.';
+      loginError.classList.remove('hidden');
+      return;
+  }
+  
+  // Logic
+  if (selectedPortal === 'club') {
+    if (code === 'SCOUT2025') {
+      window.location.href = 'dashboard_club_agent.html';
+    } else {
+      loginError.textContent = 'Invalid access code for Club/Agent portal.';
+      loginError.classList.remove('hidden');
+    }
+  } else if (selectedPortal === 'baller') {
+    if (code === 'BALLER2025') {
+      window.location.href = 'dashboard_baller.html';
+    } else {
+      loginError.textContent = 'Invalid access code for Baller League portal.';
+      loginError.classList.remove('hidden');
+    }
+  }
+}
+
+// Allow Enter key to submit code
+accessCodeInput.addEventListener('keypress', function (e) {
+    if (e.key === 'Enter') {
+      verifyAccessCode();
+    }
 });
 
+window.onclick = function(event) { if (event.target == loginModal) closeLoginModal(); }
 
-/* ---------- Demo Form Submission ---------- */
+/* --- Carousel Logic --- */
+const track = document.querySelector('.carousel-track');
+if(track) {
+    const slides = Array.from(track.children);
+    const nextBtn = document.querySelector('.carousel-button.next');
+    const prevBtn = document.querySelector('.carousel-button.prev');
+    let index = 0;
+    function updateCarousel() { track.style.transform = `translateX(-${index * 100}%)`; }
+    nextBtn.addEventListener('click', () => { index = (index + 1) % slides.length; updateCarousel(); });
+    prevBtn.addEventListener('click', () => { index = (index - 1 + slides.length) % slides.length; updateCarousel(); });
+}
+
+
+/* --- Signup Form Logic --- */
 const demoForm = document.getElementById('demoForm');
 const formMessage = document.getElementById('formMessage');
 
 demoForm.addEventListener('submit', async (e) => {
   e.preventDefault();
+  
+  const submitBtn = demoForm.querySelector('button[type="submit"]');
+  const originalText = submitBtn.innerText;
+  submitBtn.innerText = "Submitting...";
+  submitBtn.disabled = true;
+
   const data = {
-    fullName: demoForm.fullName.value,
-    email: demoForm.email.value,
-    organization: demoForm.organization.value,
-    demoAccess: demoForm.demoAccess.checked
+    fullName: document.getElementById('fullName').value,
+    email: document.getElementById('email').value,
+    organization: document.getElementById('organization').value,
+    role: document.getElementById('role').value, // Capture Role
+    demoAccess: true
   };
 
   try {
@@ -167,25 +387,35 @@ demoForm.addEventListener('submit', async (e) => {
       }
     );
 
-    if (!response.ok) throw new Error('Network response was not ok');
-
     const result = await response.json();
 
     if (result.success) {
-      console.log("Submission result:", result);
-
-      // ✅ Redirect user to dashboard on success
-      window.location.href = `welcome.html?name=${encodeURIComponent(data.fullName)}`;
+      formMessage.classList.remove('hidden');
+      formMessage.innerHTML = `
+        <strong>Request Received!</strong><br>
+        Thank you, ${data.fullName}.<br>
+        We have verified you as a <strong>${data.role}</strong>.<br>
+        Your access code will be emailed shortly.
+      `;
+      demoForm.reset();
+      
+      // ✅ Redirect user to welcome page on success
+      setTimeout(() => {
+          window.location.href = `welcome.html?name=${encodeURIComponent(data.fullName)}`;
+      }, 2000); 
+      
     } else {
-      throw new Error(result.message || 'Error submitting form via proxy.');
+      throw new Error(result.message || 'Submission error');
     }
 
   } catch (error) {
-    console.error("Error submitting form:", error);
+    console.error("Error:", error);
     alert("There was an error submitting the form. Please try again.");
+  } finally {
+      submitBtn.innerText = originalText;
+      submitBtn.disabled = false;
   }
 });
-
 </script>
 </body>
 </html>
