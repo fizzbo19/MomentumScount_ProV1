@@ -153,12 +153,14 @@
   
       </div>
 
-  <!-- Logo Section -->
-  <div class="flex items-center justify-center h-full">
-     <div class="p-8 bg-gray-800/50 rounded-xl border border-gray-700/50 backdrop-blur-sm shadow-2xl">
-        <img src="assets/Main Logo.png" alt="MomentumScout Logo" class="w-full max-w-sm h-auto object-contain">
-     </div>
-  </div>
+ 
+    <!-- Right Column: Logo (Vertically Centered) -->
+    <div class="flex items-center justify-center h-full">
+      <div class="p-8 bg-gray-800/50 rounded-xl border border-gray-700/50 backdrop-blur-sm shadow-2xl">
+         <img src="assets/Main Logo.png" alt="MomentumScout Logo" class="w-full max-w-sm h-auto object-contain">
+      </div>
+   </div>
+ </div>
 </section>
 
 <!-- Screenshots Carousel -->
@@ -365,7 +367,7 @@ async function verifyAccessCode() {
           sessionStorage.setItem('momentum_role', selectedPortal);
 
           // Redirect to the correct dashboard
-          if (selectedPortal === 'club') window.location.href = 'dashboard_club_agent.html';
+          if (selectedPortal === 'club') window.location.href = 'club_agent_dashboard.html';
           else window.location.href = 'dashboard_baller.html';
       } else {
           loginError.textContent = result.message || 'Invalid credentials.';
