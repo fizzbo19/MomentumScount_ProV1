@@ -1,0 +1,3 @@
+[build]
+  base = "MomentumAI-Frontend"
+  publish = "public"
