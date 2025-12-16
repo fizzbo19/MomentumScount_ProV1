@@ -319,7 +319,7 @@ function verifyAccessCode() {
   // Logic
   if (selectedPortal === 'club') {
     if (code === 'SCOUT2025') {
-      window.location.href = 'dashboard_club_agent.html';
+      window.location.href = 'club_agent_dashboard.html';
     } else {
       loginError.textContent = 'Invalid access code for Club/Agent portal.';
       loginError.classList.remove('hidden');
@@ -440,9 +440,9 @@ demoForm.addEventListener('submit', async (e) => {
       demoForm.reset();
       
       // ✅ Redirect user to welcome page on success
-      setTimeout(() => {
-          window.location.href = `welcome.html?name=${encodeURIComponent(data.fullName)}`;
-      }, 2000); 
+      setTimeout(() => { 
+    window.location.href = `welcome.html?name=${encodeURIComponent(data.fullName)}&role=${encodeURIComponent(data.role)}`; 
+}, 2000); 
       
     } else {
       throw new Error(result.message || 'Submission error');
