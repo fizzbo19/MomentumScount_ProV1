@@ -41,10 +41,17 @@
 </head>
 <body class="min-h-screen p-6">
 
-<script>
-  const pwd = prompt("Enter access code:");
-  if (pwd !== "SCOUT2025") { alert("Access denied."); window.location.href = "/index.html"; } 
-</script>
+  <script>
+    // Check if user has a valid session from index.html
+    const user = sessionStorage.getItem('momentum_user');
+    const role = sessionStorage.getItem('momentum_role');
+  
+    // If no user found, OR if a Baller League user tries to access the Pro dashboard -> Kick them out
+    if (!user || role !== 'club') {
+        alert("Access denied. Please log in via the home page.");
+        window.location.href = "index.html";
+    }
+  </script>
 
 <!-- Player Modal (Shared across tabs) -->
 <div id="playerModal" class="modal">

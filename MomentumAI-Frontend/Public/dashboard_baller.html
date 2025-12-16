@@ -36,10 +36,17 @@
 </head>
 <body class="min-h-screen p-6">
 
-<script>
-  const pwd = prompt("Enter access code:");
-  if (pwd !== "BALLER2025") { alert("Access denied."); window.location.href = "/index.html"; }
-</script>
+    <script>
+        // Check if user has a valid session from index.html
+        const user = sessionStorage.getItem('momentum_user');
+        const role = sessionStorage.getItem('momentum_role');
+      
+        // If no user found, OR if a Club user tries to access the Baller dashboard -> Kick them out
+        if (!user || role !== 'baller') {
+            alert("Access denied. Please log in via the home page.");
+            window.location.href = "index.html";
+        }
+      </script>
 
 <div class="max-w-6xl mx-auto space-y-8">
 

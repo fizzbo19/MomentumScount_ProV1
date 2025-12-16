@@ -2,7 +2,8 @@
 MomentumScout Backend V1 (Final Production-Ready Core)
 - Club/Agent: Uses FC26 Data.
 - Baller League: Uses Multi-Tab Excel (Attack/Defense/etc).
-- AI FEATURES: Squad Gap, Budget Target, Dynamic Training, Next Match, Heatmaps, and Comparison logic.
+- AI FEATURES: Squad Gap, Budget Target, Dynamic Training, Next Match, Heatmaps.
+- SECURITY: Includes User Management and Login Verification.
 """
 import os
 import math
@@ -10,7 +11,8 @@ import numpy as np
 import pandas as pd
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-from io import StringIO # Required for CSV parsing
+from io import StringIO
+from datetime import datetime
 
 app = Flask(__name__, static_folder="public")
 
@@ -38,13 +40,19 @@ def add_cors_headers(response):
 DATA_FOLDER_PATH = os.environ.get("DATA_FOLDER_PATH", "data")
 DATA_FILENAME_BASE = os.environ.get("DATA_FILENAME_BASE", "FC26_MomentumScout.csv")
 DATA_FILENAME_BALLER = os.environ.get("DATA_FILENAME_BALLER", "baller_league_uk.xlsx") 
-# NEW: Configuration for the Next Match data file
 DATA_FILENAME_NEXT_MATCH = os.environ.get("DATA_FILENAME_NEXT_MATCH", "baller_next_match.xlsx")
+DATA_FILENAME_SIGNUPS = "signups.csv" # File to store user signups
 
 # Global variables
 player_data_base = None 
 player_data_baller = None 
-next_match_data = None # Stores the loaded next match info
+next_match_data = None 
+
+# --- ACCESS CODES ---
+ACCESS_CODES = {
+    'club': 'SCOUT2025',
+    'baller': 'BALLER2025'
+}
 
 # --- AI DRILL DATABASE ---
 DRILL_DATABASE = {
@@ -96,16 +104,50 @@ def safe_float(val, default=0.0):
 def clean_column_name(col_name):
     return str(col_name).strip().lower().replace(' ', '_').replace('.', '').replace('%', '_pct')
 
-# --- AI GENERATORS ---
-def generate_training_plan(row, position, is_baller=False):
-    """Analyzes player stats against their position requirements to suggest drills."""
-    plan = {
-        "weakness": "General Conditioning",
-        "drills": ["Standard fitness regime", "Tactical positioning review"]
+# --- USER MANAGEMENT HELPERS ---
+def save_signup(data):
+    """Saves a new signup to the CSV file on the server."""
+    fp = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_SIGNUPS)
+    
+    if not os.path.exists(fp):
+        df = pd.DataFrame(columns=['fullName', 'email', 'organization', 'role', 'timestamp'])
+        df.to_csv(fp, index=False)
+        
+    new_row = {
+        'fullName': data.get('fullName'),
+        'email': data.get('email', '').strip().lower(),
+        'organization': data.get('organization'),
+        'role': data.get('role'),
+        'timestamp': pd.Timestamp.now().isoformat()
     }
     
+    try:
+        df_new = pd.DataFrame([new_row])
+        df_new.to_csv(fp, mode='a', header=False, index=False)
+        return True
+    except Exception as e:
+        print(f"❌ Error saving signup: {e}")
+        return False
+
+def check_email_authorized(email):
+    """Checks if the email exists in the signups.csv file."""
+    fp = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_SIGNUPS)
+    if not os.path.exists(fp): return False
+        
+    try:
+        df = pd.read_csv(fp)
+        if 'email' in df.columns:
+            return email.strip().lower() in df['email'].str.strip().str.lower().values
+        return False
+    except Exception as e:
+        print(f"Error reading signups DB: {e}")
+        return False
+
+# --- AI GENERATORS ---
+def generate_training_plan(row, position, is_baller=False):
+    plan = { "weakness": "General Conditioning", "drills": ["Standard fitness regime", "Tactical positioning review"] }
+    
     if is_baller:
-        # Simple mapping for Baller League positions
         pos_key = 'ALL'
         if position in BALLER_WEIGHTS: pos_key = position
         weights = BALLER_WEIGHTS.get(pos_key, BALLER_WEIGHTS['ALL'])
@@ -119,9 +161,7 @@ def generate_training_plan(row, position, is_baller=False):
     
     for attr in weights.keys():
         val = safe_float(row.get(attr, 0))
-        # Normalize Baller stats (0-20 scale) to 0-100 for comparison
         if is_baller and val < 20: val = val * 5 
-        
         if val < lowest_val:
             lowest_val = val
             lowest_attr = attr
@@ -135,13 +175,8 @@ def generate_training_plan(row, position, is_baller=False):
     return plan
 
 def generate_heatmap_data(row, position):
-    """
-    Generates synthetic heatmap zone data (0-100 intensity) based on position & attributes.
-    Zones: 'box' (Penalty Area), 'wide' (Wings), 'mid' (Central Midfield), 'def' (Defensive Third)
-    """
     zones = {'box': 10, 'wide': 10, 'mid': 10, 'def': 10}
     
-    # Base intensity by position
     if position in ['ST', 'CF', 'FWD']:
         zones.update({'box': 90, 'wide': 40, 'mid': 30, 'def': 5})
     elif position in ['RW', 'LW']:
@@ -155,14 +190,13 @@ def generate_heatmap_data(row, position):
     elif position in ['LB', 'RB']:
         zones.update({'box': 10, 'wide': 85, 'mid': 50, 'def': 80})
     elif position == 'GK':
-        zones.update({'box': 100, 'wide': 0, 'mid': 0, 'def': 100}) # GK stays home
+        zones.update({'box': 100, 'wide': 0, 'mid': 0, 'def': 100})
 
-    # Attribute Modifiers (If a defender has high shooting, bump box threat)
     shooting = safe_float(row.get('shooting', 0))
     if shooting > 80: zones['box'] += 10
     
     pace = safe_float(row.get('pace', 0))
-    if pace > 85: zones['wide'] += 10 # Fast players tend to drift wide
+    if pace > 85: zones['wide'] += 10
     
     return {k: min(100, v) for k,v in zones.items()}
 
@@ -212,7 +246,6 @@ def negotiation_range(current_value: int, projected_value: int):
 
 # --- DATA LOADERS ---
 def _load_baller_league_data(filename):
-    """Specific loader for Multi-Tab Excel file."""
     fp = os.path.join(DATA_FOLDER_PATH, filename)
     if not os.path.exists(fp): 
         print(f"Baller file not found: {filename}")
@@ -246,21 +279,14 @@ def _load_baller_league_data(filename):
         return pd.DataFrame()
 
 def _load_next_match_data(filename):
-    """Loads the Next Match analysis data from Excel."""
     fp = os.path.join(DATA_FOLDER_PATH, filename)
-    if not os.path.exists(fp):
-        print(f"Next match file not found at {fp}. Using mock data.")
-        return None
+    if not os.path.exists(fp): return None
     try:
         df = pd.read_excel(fp)
         df.columns = [clean_column_name(c) for c in df.columns]
-        if not df.empty:
-            # Convert first row to dictionary for JSON response
-            return df.iloc[0].to_dict()
+        if not df.empty: return df.iloc[0].to_dict()
         return None
-    except Exception as e:
-        print(f"Error reading Next Match Excel: {e}")
-        return None
+    except Exception: return None
 
 def _load_fc26_data(filename):
     fp = os.path.join(DATA_FOLDER_PATH, filename)
@@ -296,8 +322,62 @@ def initialize_app():
     next_match_data = _load_next_match_data(DATA_FILENAME_NEXT_MATCH)
     if next_match_data:
         print("✅ Next Match Data Loaded.")
+        
+    # Initialize signup DB
+    save_signup({'fullName': 'Admin', 'email': 'admin@momentumscout.com', 'organization': 'Admin', 'role': 'Admin'})
 
-# --- ROUTES ---
+# --- API ROUTES ---
+
+@app.route("/", methods=["GET"])
+def health_check():
+    """NEW: Health check to prevent 404 errors on root."""
+    return jsonify({
+        "status": "online",
+        "message": "MomentumScout V1 Backend is Running",
+        "endpoints": ["/api/search_player", "/api/find_players", "/api/verify_login"]
+    }), 200
+
+@app.route("/api/verify_login", methods=["POST", "OPTIONS"])
+def api_verify_login():
+    """Validates email existence AND access code."""
+    if request.method == "OPTIONS": return "", 200
+    try:
+        data = request.json or {}
+        email = data.get("email", "").strip().lower()
+        code = data.get("code", "").strip()
+        portal = data.get("portal", "") # 'club' or 'baller'
+        
+        # 1. Check Access Code (The Key)
+        correct_code = ACCESS_CODES.get(portal)
+        if not correct_code or code != correct_code:
+            return jsonify({"success": False, "message": "Invalid Access Code."}), 401
+            
+        # 2. Check Email Authorization (The Lock)
+        if not check_email_authorized(email):
+            return jsonify({"success": False, "message": "Email not recognized. Please request access first."}), 403
+            
+        return jsonify({"success": True, "message": "Login Verified"})
+        
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/submit_demo", methods=["POST", "OPTIONS"])
+def api_submit_demo():
+    if request.method == "OPTIONS": return "", 200
+    try:
+        data = request.json or {}
+        # Save to local CSV (The 'Database' for login checks)
+        save_signup(data)
+        
+        # Optional: Forward to Google Sheets
+        if GOOGLE_SCRIPT_URL and "script.google.com" in GOOGLE_SCRIPT_URL:
+            try: requests.post(GOOGLE_SCRIPT_URL, json=data, timeout=2)
+            except: pass 
+
+        return jsonify({"success": True, "message": "Signup recorded."})
+    except Exception as e:
+        print(f"Error in submit: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route("/api/find_players", methods=["POST", "OPTIONS"])
 def api_find_players():
@@ -332,7 +412,6 @@ def api_find_players():
             val = safe_int(row.get("value_eur"), 0)
             neg = negotiation_range(val, projections[-1]['projected_value_eur'])
             
-            # Generate Training Plan & Heatmap
             training_plan = generate_training_plan(row, row.get('club_position', 'CM'), is_baller)
             heatmap = generate_heatmap_data(row, row.get('club_position', 'CM'))
             
@@ -348,7 +427,7 @@ def api_find_players():
                 "projections": projections,
                 "negotiation": neg,
                 "ai_training": training_plan, 
-                "heatmap_zones": heatmap, # NEW Heatmap Data
+                "heatmap_zones": heatmap,
                 "full_attributes": p_dict
             })
         return jsonify({"players": out})
@@ -379,8 +458,6 @@ def api_search_player():
             score = compute_score_for_player(row, row.get('club_position','CM'), None, is_baller)
             age = safe_int(row.get("age"), 21)
             projections = project_player(row, years_to_project(age))
-            
-            # AI Logic
             training_plan = generate_training_plan(row, row.get('club_position', 'CM'), is_baller)
             heatmap = generate_heatmap_data(row, row.get('club_position', 'CM'))
             
@@ -390,7 +467,7 @@ def api_search_player():
                 "momentum_score": score,
                 "projections": projections,
                 "ai_training": training_plan, 
-                "heatmap_zones": heatmap, # NEW Heatmap Data
+                "heatmap_zones": heatmap,
                 "value_eur": safe_int(p_dict.get('value_eur')),
                 "full_attributes": p_dict
             })
@@ -400,7 +477,6 @@ def api_search_player():
 
 @app.route("/api/squad_gap_analysis", methods=["POST", "OPTIONS"])
 def api_squad_gap_analysis():
-    """ACTIVATED: Analyzes uploaded squad CSV against 'League Average'."""
     if request.method == "OPTIONS": return "", 200
     try:
         payload = request.json or {}
@@ -440,7 +516,6 @@ def api_squad_gap_analysis():
 
 @app.route("/api/budget_target", methods=["POST", "OPTIONS"])
 def api_budget_target():
-    """ACTIVATED: Recommends players based on wage budget and contract expiry."""
     if request.method == "OPTIONS": return "", 200
     try:
         payload = request.json or {}
@@ -469,7 +544,6 @@ def api_budget_target():
 
 @app.route("/api/next_match", methods=["GET", "OPTIONS"])
 def api_next_match():
-    """Returns competitor data for the 'Next Up' tab (from Excel or Mock)."""
     if request.method == "OPTIONS": return "", 200
     
     if next_match_data:
@@ -494,7 +568,6 @@ def api_next_match():
             "prep_drills": [next_match_data.get("drill_1", "General Prep"), next_match_data.get("drill_2", "Tactical Review")]
         })
     
-    # Fallback Mock Data
     return jsonify({
         "opponent": "Rebels FC (Mock)",
         "formation": "4-3-3 (Attack)",
@@ -505,11 +578,13 @@ def api_next_match():
         "prep_drills": ["Drill: Low-block transitions.", "Drill: Counter-attack passing channels."]
     })
 
-# --- NEW: COMPARISON & SIMILAR PLAYER ENDPOINTS ---
+@app.route("/api/player_detail/<player_id>", methods=["GET", "OPTIONS"])
+def api_player_detail(player_id):
+    if request.method == "OPTIONS": return "", 200
+    return jsonify({"charts": []})
 
 @app.route("/api/compare_players", methods=["POST", "OPTIONS"])
 def api_compare_players():
-    """Returns side-by-side stats for two players."""
     if request.method == "OPTIONS": return "", 200
     try:
         payload = request.json or {}
@@ -520,7 +595,6 @@ def api_compare_players():
         df = player_data_baller if data_source == 'baller' else player_data_base
         if df is None: return jsonify({"error": "Data not loaded"}), 500
         
-        # Simple fuzzy find
         p1 = df[df['short_name'].astype(str).str.lower().str.contains(p1_name)].head(1)
         p2 = df[df['short_name'].astype(str).str.lower().str.contains(p2_name)].head(1)
         
@@ -548,7 +622,6 @@ def api_compare_players():
 
 @app.route("/api/similar_players", methods=["POST", "OPTIONS"])
 def api_similar_players():
-    """Finds players with similar attributes (Euclidean distance simplified)."""
     if request.method == "OPTIONS": return "", 200
     try:
         payload = request.json or {}
@@ -557,17 +630,13 @@ def api_similar_players():
         
         df = player_data_baller if data_source == 'baller' else player_data_base
         
-        # 1. Find Target
         target = df[df['short_name'].astype(str).str.lower().str.contains(target_name)].head(1)
         if target.empty: return jsonify({"similar": []})
         target_row = target.iloc[0]
         
-        # 2. Define Key Stats for Similarity
         key_stats = ['pace', 'shooting', 'passing', 'dribbling', 'defending', 'physic']
         if data_source == 'baller': key_stats = ['goals', 'assists', 'tackles', 'total_saves']
         
-        # 3. Simple Similarity (Delta sum) - fast for prototype
-        # Real ML would use Cosine Similarity
         candidates = df[df['club_position'] == target_row['club_position']].copy()
         
         def calc_dist(row):
@@ -577,14 +646,14 @@ def api_similar_players():
             return dist
             
         candidates['distance'] = candidates.apply(calc_dist, axis=1)
-        similar = candidates.sort_values('distance').head(6) # Top 5 similar (excluding self usually 1st)
+        similar = candidates.sort_values('distance').head(6) 
         
         out = []
         for _, row in similar.iterrows():
             if row['short_name'] == target_row['short_name']: continue
             out.append({
                 "name": row['short_name'],
-                "match_percentage": max(0, 100 - row['distance']), # Rough proxy for similarity %
+                "match_percentage": max(0, 100 - row['distance']),
                 "value_eur": safe_int(row.get('value_eur', 0))
             })
             
@@ -592,17 +661,11 @@ def api_similar_players():
     except Exception as e:
          return jsonify({"similar": []})
 
-
-@app.route("/api/player_detail/<player_id>", methods=["GET", "OPTIONS"])
-def api_player_detail(player_id):
-    if request.method == "OPTIONS": return "", 200
-    # Returns placeholder charts, but detailed training logic is now in find/search routes
-    return jsonify({"charts": []})
-
 @app.route("/assets/<path:filename>")
 def serve_assets(filename):
     return send_from_directory(os.path.join(app.root_path, "public/assets"), filename)
 
+# --- Main Execution ---
 if __name__ == "__main__":
     print("🚀 Initializing backend...")
     initialize_app()

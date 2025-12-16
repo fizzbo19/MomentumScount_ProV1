@@ -336,11 +336,52 @@ function verifyAccessCode() {
 }
 
 // Allow Enter key to submit code
-accessCodeInput.addEventListener('keypress', function (e) {
-    if (e.key === 'Enter') {
-      verifyAccessCode();
-    }
-});
+async function verifyAccessCode() {
+  const email = loginEmailInput.value.trim();
+  const code = accessCodeInput.value.trim();
+  const btn = document.querySelector('#accessCodeSection button');
+  
+  if (!email || !code) {
+      loginError.textContent = 'Please enter both email and access code.';
+      loginError.classList.remove('hidden');
+      return;
+  }
+  
+  btn.innerText = "Verifying...";
+  btn.disabled = true;
+  loginError.classList.add('hidden');
+
+  try {
+      const response = await fetch('https://momentumai-backend-g1ov.onrender.com/api/verify_login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email, code: code, portal: selectedPortal })
+      });
+      
+      const result = await response.json();
+      
+      if (response.ok && result.success) {
+          // ✅ SUCCESS: Save the "Session Key" so they don't have to log in again
+          sessionStorage.setItem('momentum_user', email);
+          sessionStorage.setItem('momentum_role', selectedPortal);
+
+          // Redirect to the correct dashboard
+          if (selectedPortal === 'club') window.location.href = 'dashboard_club_agent.html';
+          else window.location.href = 'dashboard_baller.html';
+      } else {
+          loginError.textContent = result.message || 'Invalid credentials.';
+          loginError.classList.remove('hidden');
+          btn.innerText = "Login";
+          btn.disabled = false;
+      }
+  } catch (err) {
+      console.error(err);
+      loginError.textContent = 'Connection error. Please try again.';
+      loginError.classList.remove('hidden');
+      btn.innerText = "Login";
+      btn.disabled = false;
+  }
+}
 
 window.onclick = function(event) { if (event.target == loginModal) closeLoginModal(); }
 
