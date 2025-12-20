@@ -38,11 +38,17 @@ def add_cors_headers(response):
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return response
 
-# --- CONFIGURATION (PATH FIX) ---
+# --- CONFIGURATION (SMART PATH FIX) ---
 # Determine the absolute path to the data folder relative to this script
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# If running from src/, data is likely one level up ('../data')
-DEFAULT_DATA_PATH = os.path.join(BASE_DIR, '../data') 
+
+# Check if 'data' exists in the current directory (Root deployment)
+if os.path.exists(os.path.join(BASE_DIR, 'data')):
+    DEFAULT_DATA_PATH = os.path.join(BASE_DIR, 'data')
+else:
+    # Fallback to one level up (Src folder deployment)
+    DEFAULT_DATA_PATH = os.path.join(BASE_DIR, '../data')
+
 # Allow environment override, else use calculated path
 DATA_FOLDER_PATH = os.environ.get("DATA_FOLDER_PATH", DEFAULT_DATA_PATH)
 
@@ -405,6 +411,7 @@ def _load_fc26_data(filename):
     df.columns = [clean_column_name(c) for c in df.columns]
     
     # CRITICAL FIX: Ensure all numeric-like columns are coerced to numbers
+    # Updated to include 'club_contract_valid_until_year' for the budget tool
     numeric_cols = [col for col in df.columns if df[col].dtype == 'object']
     for col in numeric_cols:
         try: 
@@ -421,17 +428,54 @@ def _load_fc26_data(filename):
             except:
                 return ""
         df["player_face_url"] = df["sofifa_id"].apply(get_face_url)
+    
+    # ⚠️ FIXED: PRIORITIZE CSV 'player_face_url' if it exists and is valid
+    if "player_face_url" in df.columns:
+        # If the generated one is empty, or if we want to prefer the CSV one:
+        # Assuming the CSV one is better if present.
+        # But wait, we just overwrote it above with the generator.
+        # FIX: Only run generator if column MISSING or fill NA.
+        pass # The logic above overwrote it. Let's fix that.
+        
     return df
+
+# Redefine to fix the overwrite issue
+def _load_fc26_data(filename):
+    fp = os.path.join(DATA_FOLDER_PATH, filename)
+    if not os.path.exists(fp): return pd.DataFrame()
+    try:
+        if filename.endswith('.csv'): df = pd.read_csv(fp, encoding="utf-8-sig")
+        else: df = pd.read_excel(fp) 
+    except: return pd.DataFrame()
+    
+    df.columns = [clean_column_name(c) for c in df.columns]
+    
+    # Numeric Coercion
+    numeric_cols = [col for col in df.columns if df[col].dtype == 'object']
+    for col in numeric_cols:
+        try: 
+            if any(x in col for x in ['overall', 'value', 'wage', 'pace', 'shooting', 'passing', 'dribbling', 'defending', 'physic', 'age', 'contract']):
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        except: pass
+
+    # Face URL Logic: Use CSV column if exists, else generate
+    if "player_face_url" not in df.columns and "sofifa_id" in df.columns:
+        def get_face_url(x):
+            try:
+                if pd.isna(x): return ""
+                val = int(x)
+                return f"https://cdn.sofifa.net/players/{val//1000:03d}/{val%1000:03d}/24.webp"
+            except: return ""
+        df["player_face_url"] = df["sofifa_id"].apply(get_face_url)
+        
+    return df
+
 
 def initialize_app():
     global player_data_base, player_data_baller, next_match_data
-    print("--- Loading Data ---")
     player_data_base = _load_fc26_data(DATA_FILENAME_BASE)
-    print(f"✅ Club/Agent Data Ready: {len(player_data_base)} players.")
     player_data_baller = _load_baller_league_data(DATA_FILENAME_BALLER)
-    print(f"✅ Baller League Data Ready: {len(player_data_baller)} players.")
     next_match_data = _load_next_match_data(DATA_FILENAME_NEXT_MATCH)
-    if next_match_data: print("✅ Next Match Data Loaded.")
     
     # Check if admin exists before adding
     admin_email = 'info@momentumscout.com'
@@ -545,6 +589,7 @@ def api_find_players():
         return jsonify({"players": out})
     except Exception as e: return jsonify({"players": [], "error": str(e)}), 500
 
+# [ADVANCED V1 ROUTES (Comparison, Similar, Squad, Budget, Next Match)]
 @app.route("/api/compare_players", methods=["POST", "OPTIONS"])
 def api_compare_players():
     if request.method == "OPTIONS": return "", 200
