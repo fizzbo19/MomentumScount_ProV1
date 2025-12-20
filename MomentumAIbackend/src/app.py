@@ -20,9 +20,12 @@ from datetime import datetime, timedelta
 app = Flask(__name__, static_folder="public")
 
 # --- CONFIG & ORIGINS ---
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://momentum-ai-io.netlify.app") 
+# Added 'https://momentumscout.netlify.app' to default allowed origins to fix CORS
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://momentumscout.netlify.app") 
 ALLOWED_ORIGINS = [
     FRONTEND_URL,
+    "https://momentum-ai-io.netlify.app", # Keep old one just in case
+    "https://momentumscout.netlify.app",  # Your actual live site
     "http://localhost:3000", "http://127.0.0.1:3000",
     "http://localhost:5000", "http://127.0.0.1:5000"
 ]
