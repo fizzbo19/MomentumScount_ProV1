@@ -45,6 +45,7 @@ DATA_FILENAME_BASE = os.environ.get("DATA_FILENAME_BASE", "FC26_MomentumScout.cs
 DATA_FILENAME_BALLER = os.environ.get("DATA_FILENAME_BALLER", "baller_league_uk.xlsx") 
 DATA_FILENAME_NEXT_MATCH = os.environ.get("DATA_FILENAME_NEXT_MATCH", "baller_next_match.xlsx")
 DATA_FILENAME_SIGNUPS = "signups.csv" 
+DATA_FILENAME_AUDIT = "analyst_usage.csv"
 
 # Global Data
 player_data_base = None 
@@ -233,8 +234,6 @@ def negotiation_range(current_value: int, projected_value: int):
 # --- USER MANAGEMENT & SECURITY (UPDATED) ---
 def save_signup(data):
     fp = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_SIGNUPS)
-    
-    # Check if file exists, if not create
     if not os.path.exists(fp):
         df = pd.DataFrame(columns=['fullName', 'email', 'organization', 'role', 'tier', 'plan', 'timestamp'])
         df.to_csv(fp, index=False)
@@ -248,7 +247,6 @@ def save_signup(data):
         'plan': data.get('plan', 'monthly'), # Default to monthly
         'timestamp': datetime.now().isoformat()
     }
-    
     try:
         # Check for duplicates
         df = pd.read_csv(fp)
@@ -319,6 +317,16 @@ def check_login_status(email):
         print(f"❌ Login Check Error: {e}")
         return False, f"System Error: {str(e)}", {}
 
+def log_analyst_usage(email, player_name):
+    """Simple audit logging for Analyst AI usage."""
+    fp = os.path.join(DATA_FOLDER_PATH, "analyst_usage.csv")
+    if not os.path.exists(fp):
+        pd.DataFrame(columns=['email', 'player', 'timestamp']).to_csv(fp, index=False)
+    try:
+        new_row = {'email': email, 'player': player_name, 'timestamp': datetime.now().isoformat()}
+        pd.DataFrame([new_row]).to_csv(fp, mode='a', header=False, index=False)
+    except: pass
+
 # --- DATA LOADERS ---
 def _load_baller_league_data(filename):
     fp = os.path.join(DATA_FOLDER_PATH, filename)
@@ -358,20 +366,78 @@ def _load_fc26_data(filename):
         else: df = pd.read_excel(fp) 
     except: return pd.DataFrame()
     df.columns = [clean_column_name(c) for c in df.columns]
-    for c in df.columns:
-        if df[c].dtype == 'object':
-            try: df[c] = pd.to_numeric(df[c], errors='ignore')
-            except: pass
+    
+    # CRITICAL FIX: Ensure all numeric-like columns are coerced to numbers
+    # Updated to include 'club_contract_valid_until_year' for the budget tool
+    numeric_cols = [col for col in df.columns if df[col].dtype == 'object']
+    for col in numeric_cols:
+        try: 
+            if any(x in col for x in ['overall', 'value', 'wage', 'pace', 'shooting', 'passing', 'dribbling', 'defending', 'physic', 'age', 'contract']):
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        except: pass
+        
     if "sofifa_id" in df.columns:
-        df["player_face_url"] = df["sofifa_id"].apply(lambda x: f"https://cdn.sofifa.net/players/{int(x)//1000:03d}/{int(x)%1000:03d}/24.webp" if pd.notna(x) else "")
+        def get_face_url(x):
+            try:
+                if pd.isna(x): return ""
+                val = int(x)
+                return f"https://cdn.sofifa.net/players/{val//1000:03d}/{val%1000:03d}/24.webp"
+            except:
+                return ""
+        df["player_face_url"] = df["sofifa_id"].apply(get_face_url)
+    
+    # ⚠️ FIXED: PRIORITIZE CSV 'player_face_url' if it exists and is valid
+    if "player_face_url" in df.columns:
+        # If the generated one is empty, or if we want to prefer the CSV one:
+        # Assuming the CSV one is better if present.
+        # But wait, we just overwrote it above with the generator.
+        # FIX: Only run generator if column MISSING or fill NA.
+        pass # The logic above overwrote it. Let's fix that.
+        
     return df
+
+# Redefine to fix the overwrite issue
+def _load_fc26_data(filename):
+    fp = os.path.join(DATA_FOLDER_PATH, filename)
+    if not os.path.exists(fp): return pd.DataFrame()
+    try:
+        if filename.endswith('.csv'): df = pd.read_csv(fp, encoding="utf-8-sig")
+        else: df = pd.read_excel(fp) 
+    except: return pd.DataFrame()
+    
+    df.columns = [clean_column_name(c) for c in df.columns]
+    
+    # Numeric Coercion
+    numeric_cols = [col for col in df.columns if df[col].dtype == 'object']
+    for col in numeric_cols:
+        try: 
+            if any(x in col for x in ['overall', 'value', 'wage', 'pace', 'shooting', 'passing', 'dribbling', 'defending', 'physic', 'age', 'contract']):
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        except: pass
+
+    # Face URL Logic: Use CSV column if exists, else generate
+    if "player_face_url" not in df.columns and "sofifa_id" in df.columns:
+        def get_face_url(x):
+            try:
+                if pd.isna(x): return ""
+                val = int(x)
+                return f"https://cdn.sofifa.net/players/{val//1000:03d}/{val%1000:03d}/24.webp"
+            except: return ""
+        df["player_face_url"] = df["sofifa_id"].apply(get_face_url)
+        
+    return df
+
 
 def initialize_app():
     global player_data_base, player_data_baller, next_match_data
     player_data_base = _load_fc26_data(DATA_FILENAME_BASE)
     player_data_baller = _load_baller_league_data(DATA_FILENAME_BALLER)
     next_match_data = _load_next_match_data(DATA_FILENAME_NEXT_MATCH)
-    save_signup({'fullName': 'Admin', 'email': 'admin@momentumscout.com', 'organization': 'Admin', 'role': 'Admin', 'tier': 'Tier 1', 'plan': 'yearly'})
+    
+    # Check if admin exists before adding
+    admin_email = 'info@momentumscout.com'
+    if not check_email_authorized(admin_email):
+        save_signup({'fullName': 'Admin', 'email': admin_email, 'organization': 'Admin', 'role': 'Admin', 'tier': 'Tier 1', 'plan': 'yearly'})
 
 # --- API ROUTES ---
 @app.route("/", methods=["GET"])
@@ -387,7 +453,9 @@ def api_verify_login():
         is_valid, msg, entitlements = check_login_status(email)
         if not is_valid: return jsonify({"success": False, "message": msg}), 403
         return jsonify({"success": True, "message": msg, "entitlements": entitlements})
-    except Exception as e: return jsonify({"success": False, "message": str(e)}), 500
+    except Exception as e: 
+        print(f"Login Error: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route("/api/submit_demo", methods=["POST", "OPTIONS"])
 def api_submit_demo():
@@ -395,7 +463,9 @@ def api_submit_demo():
     try:
         save_signup(request.json)
         return jsonify({"success": True, "message": "Signup recorded."})
-    except Exception as e: return jsonify({"success": False, "message": str(e)}), 500
+    except Exception as e: 
+        print(f"Submit Error: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route("/api/momentum_analyst", methods=["POST", "OPTIONS"])
 def api_momentum_analyst():
@@ -412,7 +482,10 @@ def api_momentum_analyst():
 
         name = data.get("player_name")
         tier = entitlements.get("tier", "Tier 3")
-        plan = "monthly" # Default, would need to retrieve from check_login_status in robust system
+        plan = "monthly" 
+
+        # Audit Log
+        log_analyst_usage(email, name)
 
         player = player_data_base[player_data_base['short_name'] == name]
         if not player.empty:
@@ -486,7 +559,8 @@ def api_compare_players():
             "player1": { "name": p1_row['short_name'], "overall": safe_int(p1_row.get('overall')), "heatmap": generate_heatmap_data(p1_row, p1_row.get('club_position')), "stats": p1_row.to_dict() },
             "player2": { "name": p2_row['short_name'], "overall": safe_int(p2_row.get('overall')), "heatmap": generate_heatmap_data(p2_row, p2_row.get('club_position')), "stats": p2_row.to_dict() }
         })
-    except Exception as e: return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/similar_players", methods=["POST", "OPTIONS"])
 def api_similar_players():
@@ -512,7 +586,11 @@ def api_similar_players():
         out = []
         for _, row in similar.iterrows():
             if row['short_name'] != target_row['short_name']:
-                out.append({ "name": row['short_name'], "match_percentage": max(0, 100-row['distance']), "value_eur": safe_int(row.get('value_eur', 0)) })
+                out.append({
+                    "name": row['short_name'],
+                    "match_percentage": max(0, 100 - row['distance']),
+                    "value_eur": safe_int(row.get('value_eur', 0))
+                })
         return jsonify({"similar": out})
     except Exception as e:
          return jsonify({"similar": []})
@@ -605,9 +683,15 @@ def api_budget_target():
         contract_year = safe_int(payload.get("contract_year"), 2026)
         
         df = player_data_base.copy()
+        
+        # ⚠️ FIXED: Updated to look for 'club_contract_valid_until_year' first, then fallback
+        contract_col = 'contract_valid_until'
+        if 'club_contract_valid_until_year' in df.columns:
+            contract_col = 'club_contract_valid_until_year'
+            
         df = df[ (df['wage_eur'] * 52) <= max_wage ]
-        if 'contract_valid_until' in df.columns:
-            df = df[df['contract_valid_until'] <= contract_year]
+        if contract_col in df.columns:
+            df = df[df[contract_col] <= contract_year]
             
         targets = df.sort_values(by='overall', ascending=False).head(10)
         out = []
@@ -618,7 +702,7 @@ def api_budget_target():
                 "overall": row['overall'],
                 "value_eur": row['value_eur'],
                 "wage_yearly": row['wage_eur'] * 52,
-                "contract_end": int(row.get('contract_valid_until', 0))
+                "contract_end": int(row.get(contract_col, 0))
             })
         return jsonify({"targets": out})
     except Exception:
@@ -633,8 +717,18 @@ def api_next_match():
             "formation": next_match_data.get("formation", "4-4-2"),
             "team_rating": next_match_data.get("rating", 75),
             "insights": [next_match_data.get("insight_1", ""), next_match_data.get("insight_2", "")],
-            "key_threat": { "name": next_match_data.get("threat_name", "N/A"), "position": next_match_data.get("threat_pos", "FWD"), "goals": next_match_data.get("threat_goals", 0), "score": next_match_data.get("threat_score", 80) },
-            "weak_link": { "name": next_match_data.get("weakness_name", "N/A"), "position": next_match_data.get("weakness_pos", "DEF"), "tackles": next_match_data.get("weakness_stat", 0), "score": next_match_data.get("weakness_score", 50) },
+            "key_threat": {
+                "name": next_match_data.get("threat_name", "N/A"),
+                "position": next_match_data.get("threat_pos", "FWD"),
+                "goals": next_match_data.get("threat_goals", 0),
+                "score": next_match_data.get("threat_score", 80)
+            },
+            "weak_link": {
+                "name": next_match_data.get("weakness_name", "N/A"),
+                "position": next_match_data.get("weakness_pos", "DEF"),
+                "tackles": next_match_data.get("weakness_stat", 0),
+                "score": next_match_data.get("weakness_score", 50)
+            },
             "prep_drills": [next_match_data.get("drill_1", "General Prep"), next_match_data.get("drill_2", "Tactical Review")]
         })
     return jsonify({
@@ -646,6 +740,11 @@ def api_next_match():
         "weak_link": {"name": "Liam Smith", "position": "CB", "tackles": 38, "score": 42.5},
         "prep_drills": ["Drill: Low-block transitions.", "Drill: Counter-attack passing channels."]
     })
+
+@app.route("/api/player_detail/<player_id>", methods=["GET", "OPTIONS"])
+def api_player_detail(player_id):
+    if request.method == "OPTIONS": return "", 200
+    return jsonify({"charts": []})
 
 @app.route("/assets/<path:filename>")
 def serve_assets(filename):
