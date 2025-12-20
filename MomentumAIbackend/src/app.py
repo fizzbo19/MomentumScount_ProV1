@@ -106,7 +106,8 @@ BALLER_WEIGHTS = {
 }
 
 POSITION_MAP = {
-    'FWD': 'ST', 'MID': 'CM', 'DEF': 'CB', 'GOALKEEPER': 'GK', 'FORWARD': 'ST'
+    'FWD': 'ST', 'MID': 'CM', 'DEF': 'CB', 'GOALKEEPER': 'GK', 'FORWARD': 'ST',
+    'ST': 'ST', 'CM': 'CM', 'CB': 'CB', 'GK': 'GK'
 }
 
 # --- HELPERS ---
@@ -345,12 +346,34 @@ def _load_baller_league_data(filename):
         if merged is not None:
             merged = merged.fillna(0)
             merged['short_name'] = merged.get('name', 'Unknown')
-            merged['club_position'] = 'Baller'
+            
+            # --- FIX 9: Position Normalization ---
+            # Try to map 'position' or 'pos' column to standard ID if it exists
+            # Otherwise default to 'Baller'
+            raw_pos = merged.get('position', merged.get('pos', 'Baller'))
+            # If raw_pos is a Series (column), map it
+            if isinstance(raw_pos, pd.Series):
+                merged['club_position'] = raw_pos.map(lambda x: POSITION_MAP.get(str(x).upper(), 'Baller'))
+            else:
+                merged['club_position'] = 'Baller'
+
+            # --- FIX 1: Vectorized Momentum Score Calculation ---
+            # Using pd.to_numeric to handle entire columns safely
+            goals = pd.to_numeric(merged.get('goals', 0), errors='coerce').fillna(0)
+            assists = pd.to_numeric(merged.get('assists', 0), errors='coerce').fillna(0)
+            tackles = pd.to_numeric(merged.get('tackles', 0), errors='coerce').fillna(0)
+            
             if 'momentum_score' not in merged.columns:
-                merged['momentum_score'] = safe_float(merged.get('goals', 0))*5 + safe_float(merged.get('tackles', 0))*3
+                merged['momentum_score'] = (goals * 5) + (assists * 3) + (tackles * 2)
+            
+            merged['overall'] = 50 + (merged['momentum_score'].clip(upper=50)).astype(int)
+            merged['potential'] = merged['overall'] + 5
+            merged['value_eur'] = merged['momentum_score'] * 10000
             return merged
         return pd.DataFrame()
-    except: return pd.DataFrame()
+    except Exception as e:
+        print(f"Error reading Baller Excel: {e}")
+        return pd.DataFrame()
 
 def _load_next_match_data(filename):
     fp = os.path.join(DATA_FOLDER_PATH, filename)
@@ -368,10 +391,10 @@ def _load_fc26_data(filename):
         if filename.endswith('.csv'): df = pd.read_csv(fp, encoding="utf-8-sig")
         else: df = pd.read_excel(fp) 
     except: return pd.DataFrame()
+    
     df.columns = [clean_column_name(c) for c in df.columns]
     
     # CRITICAL FIX: Ensure all numeric-like columns are coerced to numbers
-    # Updated to include 'club_contract_valid_until_year' for the budget tool
     numeric_cols = [col for col in df.columns if df[col].dtype == 'object']
     for col in numeric_cols:
         try: 
@@ -388,48 +411,7 @@ def _load_fc26_data(filename):
             except:
                 return ""
         df["player_face_url"] = df["sofifa_id"].apply(get_face_url)
-    
-    # ⚠️ FIXED: PRIORITIZE CSV 'player_face_url' if it exists and is valid
-    if "player_face_url" in df.columns:
-        # If the generated one is empty, or if we want to prefer the CSV one:
-        # Assuming the CSV one is better if present.
-        # But wait, we just overwrote it above with the generator.
-        # FIX: Only run generator if column MISSING or fill NA.
-        pass # The logic above overwrote it. Let's fix that.
-        
     return df
-
-# Redefine to fix the overwrite issue
-def _load_fc26_data(filename):
-    fp = os.path.join(DATA_FOLDER_PATH, filename)
-    if not os.path.exists(fp): return pd.DataFrame()
-    try:
-        if filename.endswith('.csv'): df = pd.read_csv(fp, encoding="utf-8-sig")
-        else: df = pd.read_excel(fp) 
-    except: return pd.DataFrame()
-    
-    df.columns = [clean_column_name(c) for c in df.columns]
-    
-    # Numeric Coercion
-    numeric_cols = [col for col in df.columns if df[col].dtype == 'object']
-    for col in numeric_cols:
-        try: 
-            if any(x in col for x in ['overall', 'value', 'wage', 'pace', 'shooting', 'passing', 'dribbling', 'defending', 'physic', 'age', 'contract']):
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-        except: pass
-
-    # Face URL Logic: Use CSV column if exists, else generate
-    if "player_face_url" not in df.columns and "sofifa_id" in df.columns:
-        def get_face_url(x):
-            try:
-                if pd.isna(x): return ""
-                val = int(x)
-                return f"https://cdn.sofifa.net/players/{val//1000:03d}/{val%1000:03d}/24.webp"
-            except: return ""
-        df["player_face_url"] = df["sofifa_id"].apply(get_face_url)
-        
-    return df
-
 
 def initialize_app():
     global player_data_base, player_data_baller, next_match_data
@@ -437,7 +419,7 @@ def initialize_app():
     player_data_baller = _load_baller_league_data(DATA_FILENAME_BALLER)
     next_match_data = _load_next_match_data(DATA_FILENAME_NEXT_MATCH)
     
-    # Check if admin exists before adding
+    # FIX 3: Check if admin exists before adding
     admin_email = 'info@momentumscout.com'
     if not check_email_authorized(admin_email):
         save_signup({'fullName': 'Admin', 'email': admin_email, 'organization': 'Admin', 'role': 'Admin', 'tier': 'Tier 1', 'plan': 'yearly'})
@@ -502,7 +484,15 @@ def api_find_players():
     try:
         data = request.json or {}
         df = player_data_baller if data.get("data_source") == 'baller' else player_data_base
-        if df is None: return jsonify({"players": []})
+        
+        if df is None: 
+            # Reload Attempt
+            if data.get("data_source") == 'baller':
+                 df = _load_baller_league_data(DATA_FILENAME_BALLER)
+            else:
+                 df = _load_fc26_data(DATA_FILENAME_BASE)
+        
+        if df is None or df.empty: return jsonify({"players": []})
         
         df = df.copy() # Make copy immediately
         
@@ -547,7 +537,7 @@ def api_compare_players():
     if request.method == "OPTIONS": return "", 200
     try:
         data = request.json or {}
-        p1_name = data.get("player1", "").lower() # FIXED: payload -> data
+        p1_name = data.get("player1", "").lower() 
         p2_name = data.get("player2", "").lower()
         data_source = data.get("data_source", "base")
         df = player_data_baller if data.get("data_source") == 'baller' else player_data_base
@@ -570,7 +560,7 @@ def api_similar_players():
     if request.method == "OPTIONS": return "", 200
     try:
         data = request.json or {}
-        target_name = data.get("target_player", "").lower() # FIXED: payload -> data
+        target_name = data.get("target_player", "").lower() 
         data_source = data.get("data_source", "base")
         df = player_data_baller if data_source == 'baller' else player_data_base
         target = df[df['short_name'].astype(str).str.lower().str.contains(target_name)].head(1)
@@ -610,7 +600,7 @@ def api_search_player():
         if df is None or df.empty or not query: return jsonify([])
         mask = df['short_name'].astype(str).str.lower().str.contains(query) 
         if 'name' in df.columns:
-             mask |= df['name'].astype(str).str.lower().str.contains(query) # FIXED
+             mask |= df['name'].astype(str).str.lower().str.contains(query)
              
         results = df[mask].head(10)
         
@@ -687,7 +677,6 @@ def api_budget_target():
         
         df = player_data_base.copy()
         
-        # ⚠️ FIXED: Updated to look for 'club_contract_valid_until_year' first, then fallback
         contract_col = 'contract_valid_until'
         if 'club_contract_valid_until_year' in df.columns:
             contract_col = 'club_contract_valid_until_year'
@@ -753,8 +742,14 @@ def api_player_detail(player_id):
 def serve_assets(filename):
     return send_from_directory(os.path.join(app.root_path, "public/assets"), filename)
 
-if __name__ == "__main__":
-    print("🚀 Initializing backend...")
+# --- INITIALIZATION LOGIC (CRITICAL: Runs immediately) ---
+try:
+    print("🚀 Auto-Initializing backend data loaders...")
     initialize_app()
+except Exception as e:
+    print(f"❌ Initialization Error: {e}")
+
+# --- Main Execution ---
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
