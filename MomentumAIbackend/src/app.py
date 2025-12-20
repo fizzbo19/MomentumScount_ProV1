@@ -1,12 +1,10 @@
 """
 MomentumScout Backend V1.1 (Final Complete)
----------------------------------------------------------
-1. DATA: FC26 (Clubs) + Multi-Tab Excel (Baller League).
-2. AI CORE: Squad Gap, Budget Target, Dynamic Training, Next Match.
-3. VISUALS: Heatmaps, Player Comparison, Similar Players.
-4. PREMIUM: Momentum Analyst AI + Tiered Entitlements.
-5. SECURITY: 14-Day Trial Enforcement + Email Verification.
----------------------------------------------------------
+- Club/Agent: Uses FC26 Data.
+- Baller League: Uses Multi-Tab Excel.
+- AI FEATURES: Squad Gap, Budget Target, Dynamic Training, Next Match, Heatmaps, Comparison.
+- SECURITY: 14-Day Trial Enforcement & Email Verification.
+- FIX: Smart Path Detection for Data Folder (Solves 'non-existent directory' error).
 """
 import os
 import math
@@ -19,13 +17,11 @@ from datetime import datetime, timedelta
 
 app = Flask(__name__, static_folder="public")
 
-# --- CONFIG & ORIGINS ---
-# Added 'https://momentumscout.netlify.app' to default allowed origins to fix CORS
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://momentumscout.netlify.app") 
+# Frontend origin for CORS
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://momentum-ai-io.netlify.app") 
 ALLOWED_ORIGINS = [
     FRONTEND_URL,
-    "https://momentum-ai-io.netlify.app", # Keep old one just in case
-    "https://momentumscout.netlify.app",  # Your actual live site
+    "https://momentumscout.netlify.app",
     "http://localhost:3000", "http://127.0.0.1:3000",
     "http://localhost:5000", "http://127.0.0.1:5000"
 ]
@@ -42,8 +38,14 @@ def add_cors_headers(response):
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return response
 
-# --- FILE PATHS ---
-DATA_FOLDER_PATH = os.environ.get("DATA_FOLDER_PATH", "data")
+# --- CONFIGURATION (PATH FIX) ---
+# Determine the absolute path to the data folder relative to this script
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# If running from src/, data is likely one level up ('../data')
+DEFAULT_DATA_PATH = os.path.join(BASE_DIR, '../data') 
+# Allow environment override, else use calculated path
+DATA_FOLDER_PATH = os.environ.get("DATA_FOLDER_PATH", DEFAULT_DATA_PATH)
+
 DATA_FILENAME_BASE = os.environ.get("DATA_FILENAME_BASE", "FC26_MomentumScout.csv")
 DATA_FILENAME_BALLER = os.environ.get("DATA_FILENAME_BALLER", "baller_league_uk.xlsx") 
 DATA_FILENAME_NEXT_MATCH = os.environ.get("DATA_FILENAME_NEXT_MATCH", "baller_next_match.xlsx")
@@ -237,7 +239,14 @@ def negotiation_range(current_value: int, projected_value: int):
 
 # --- USER MANAGEMENT & SECURITY (UPDATED) ---
 def save_signup(data):
+    # Ensure directory exists first (Fix for 'non-existent directory' error)
+    if not os.path.exists(DATA_FOLDER_PATH):
+        try:
+            os.makedirs(DATA_FOLDER_PATH)
+        except OSError: pass
+
     fp = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_SIGNUPS)
+    
     if not os.path.exists(fp):
         df = pd.DataFrame(columns=['fullName', 'email', 'organization', 'role', 'tier', 'plan', 'timestamp'])
         df.to_csv(fp, index=False)
@@ -323,6 +332,11 @@ def check_login_status(email):
 
 def log_analyst_usage(email, player_name):
     """Simple audit logging for Analyst AI usage."""
+    # Ensure directory exists
+    if not os.path.exists(DATA_FOLDER_PATH):
+        try: os.makedirs(DATA_FOLDER_PATH)
+        except: pass
+        
     fp = os.path.join(DATA_FOLDER_PATH, "analyst_usage.csv")
     if not os.path.exists(fp):
         pd.DataFrame(columns=['email', 'player', 'timestamp']).to_csv(fp, index=False)
@@ -348,17 +362,13 @@ def _load_baller_league_data(filename):
             merged['short_name'] = merged.get('name', 'Unknown')
             
             # --- FIX 9: Position Normalization ---
-            # Try to map 'position' or 'pos' column to standard ID if it exists
-            # Otherwise default to 'Baller'
             raw_pos = merged.get('position', merged.get('pos', 'Baller'))
-            # If raw_pos is a Series (column), map it
             if isinstance(raw_pos, pd.Series):
                 merged['club_position'] = raw_pos.map(lambda x: POSITION_MAP.get(str(x).upper(), 'Baller'))
             else:
                 merged['club_position'] = 'Baller'
 
             # --- FIX 1: Vectorized Momentum Score Calculation ---
-            # Using pd.to_numeric to handle entire columns safely
             goals = pd.to_numeric(merged.get('goals', 0), errors='coerce').fillna(0)
             assists = pd.to_numeric(merged.get('assists', 0), errors='coerce').fillna(0)
             tackles = pd.to_numeric(merged.get('tackles', 0), errors='coerce').fillna(0)
@@ -415,11 +425,15 @@ def _load_fc26_data(filename):
 
 def initialize_app():
     global player_data_base, player_data_baller, next_match_data
+    print("--- Loading Data ---")
     player_data_base = _load_fc26_data(DATA_FILENAME_BASE)
+    print(f"✅ Club/Agent Data Ready: {len(player_data_base)} players.")
     player_data_baller = _load_baller_league_data(DATA_FILENAME_BALLER)
+    print(f"✅ Baller League Data Ready: {len(player_data_baller)} players.")
     next_match_data = _load_next_match_data(DATA_FILENAME_NEXT_MATCH)
+    if next_match_data: print("✅ Next Match Data Loaded.")
     
-    # FIX 3: Check if admin exists before adding
+    # Check if admin exists before adding
     admin_email = 'info@momentumscout.com'
     if not check_email_authorized(admin_email):
         save_signup({'fullName': 'Admin', 'email': admin_email, 'organization': 'Admin', 'role': 'Admin', 'tier': 'Tier 1', 'plan': 'yearly'})
@@ -459,7 +473,7 @@ def api_momentum_analyst():
     try:
         data = request.json or {}
         # Enforce Entitlements using SERVER-SIDE lookup
-        email = data.get("email") # Require frontend to send email
+        email = data.get("email") 
         is_valid, _, entitlements = check_login_status(email)
         
         if not is_valid or not entitlements.get("analyst_ai"):
@@ -531,7 +545,6 @@ def api_find_players():
         return jsonify({"players": out})
     except Exception as e: return jsonify({"players": [], "error": str(e)}), 500
 
-# [ADVANCED V1 ROUTES (Comparison, Similar, Squad, Budget, Next Match)]
 @app.route("/api/compare_players", methods=["POST", "OPTIONS"])
 def api_compare_players():
     if request.method == "OPTIONS": return "", 200
