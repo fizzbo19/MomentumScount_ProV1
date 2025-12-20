@@ -41,17 +41,10 @@
 </head>
 <body class="min-h-screen p-6">
 
-  <script>
-    // Check if user has a valid session from index.html
-    const user = sessionStorage.getItem('momentum_user');
-    const role = sessionStorage.getItem('momentum_role');
-  
-    // If no user found, OR if a Baller League user tries to access the Pro dashboard -> Kick them out
-    if (!user || role !== 'club') {
-        alert("Access denied. Please log in via the home page.");
-        window.location.href = "index.html";
-    }
-  </script>
+<script>
+  const pwd = prompt("Enter access code:");
+  if (pwd !== "SCOUT2025") { alert("Access denied."); window.location.href = "/index.html"; } 
+</script>
 
 <!-- Player Modal (Shared across tabs) -->
 <div id="playerModal" class="modal">
@@ -64,7 +57,7 @@
 <div class="max-w-7xl mx-auto space-y-6">
 
   <header class="text-center mb-8">
-    <h1 class="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-teal-500">MomentumScout V1 Pro</h1>
+    <h1 class="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-teal-500">MomentumScout</h1>
     <p class="text-gray-400 mt-2 text-lg">Club & Agent Intelligence Dashboard: Scout. Analyze. Win.</p>
   </header>
 
@@ -136,7 +129,7 @@
 
     <!-- TAB 2: SQUAD ANALYZER (V1 Feature) -->
     <section id="squad" class="tab-pane hidden bg-gray-800 border border-gray-700 rounded-b-xl rounded-tr-xl p-6">
-        <h2 class="text-2xl font-semibold text-green-400 mb-4">Squad Gap Analysis</h2>
+        <h2 class="text-2xl font-semibold text-green-400 mb-4">Squad Gap Analysis Pro</h2>
         <p class="text-gray-400 mb-6">Upload your current squad CSV to identify attribute deficits compared to league averages.</p>
         
         <div class="flex flex-col md:flex-row gap-8">
@@ -170,8 +163,7 @@
 
     <!-- TAB 3: TRANSFER TARGETS (V1 Feature) -->
     <section id="targets" class="tab-pane hidden bg-gray-800 border border-gray-700 rounded-b-xl rounded-tr-xl p-6">
-        <h2 class="text-2xl font-semibold text-green-400 mb-4">Budget & Contract Targeting</h2>
-        
+        <h2 class="text-2xl font-semibold text-green-400 mb-4">Budget & Contract Targeting Pro</h2>
         <div class="grid grid-cols-1 md:grid-cols-12 gap-8">
             <!-- Sidebar Controls -->
             <div class="md:col-span-4 space-y-6">
@@ -233,11 +225,7 @@
             <div class="md:col-span-1 space-y-4">
                 <h3 class="text-lg font-bold text-green-400">MomentumAI Reports</h3>
                 <div id="trainingRegime" class="space-y-4">
-                    <!-- Report 1: Trajectory -->
-                    <div class="report-box border-l-4 border-blue-500">
-                        <h5 class="font-bold text-white text-sm">1. Trajectory Analysis</h5>
-                        <p class="text-xs text-gray-500 mt-2">Select a player to generate report...</p>
-                    </div>
+                    <!-- Injected content via JS -->
                 </div>
                 
                 <button class="w-full py-3 bg-teal-600 hover:bg-teal-700 rounded-md text-white font-bold shadow-lg mt-6">
@@ -298,6 +286,10 @@ function switchTab(targetId) {
 function setupEventListeners() {
     closeModal.addEventListener('click', ()=> modal.style.display='none');
     window.addEventListener('click', (e)=> { if (e.target === modal) modal.style.display='none'; });
+
+    document.getElementById('backToScouting').addEventListener('click', () => {
+        switchTab('scouting');
+    });
 
     document.querySelectorAll('.tab-button').forEach(tab => {
         tab.addEventListener('click', () => switchTab(tab.dataset.tab));
@@ -365,7 +357,6 @@ function populatePositions(){
     const sOpt = document.createElement('option'); sOpt.value = p; sOpt.textContent = p; squadPositionSelect.appendChild(sOpt);
   });
 }
-
 function buildCoreSliders() {
   coreSliders.innerHTML = ''; 
   coreSliders.insertAdjacentHTML('beforeend', createSlider('Overall', 50, 99, 75, 95));
@@ -373,15 +364,19 @@ function buildCoreSliders() {
   coreSliders.insertAdjacentHTML('beforeend', createValueInputBlock('Value', DEFAULT_VALUE_MIN, DEFAULT_VALUE_MAX));
   setupSliderListeners(); setupValueInputListeners();
 }
-
 function createSlider(attr, min, max, valMin, valMax) {
   return `<div class="mb-4"><label class="block text-sm mb-1 font-medium">${attr}: <span id="${attr}Val">${valMin} - ${valMax}</span></label><input id="${attr}_min" type="range" min="${min}" max="${max}" value="${valMin}" class="attribute-slider mb-2"><input id="${attr}_max" type="range" min="${min}" max="${max}" value="${valMax}" class="attribute-slider"></div>`;
 }
-
 function createValueInputBlock(attr, valMin, valMax) {
-  return `<div class="mb-4 fade-in"><label class="block text-sm mb-1 font-medium">${attr} (GBP):</label><div class="grid grid-cols-2 gap-2"><input id="${attr}_min" type="number" value="${valMin}" class="value-input"><input id="${attr}_max" type="number" value="${valMax}" class="value-input"></div></div>`;
+  const fmt = v => '£' + Number(v).toLocaleString('en-GB', { maximumFractionDigits: 0 });
+  return `<div class="mb-4 fade-in"><label class="block text-sm mb-1 font-medium">${attr} (GBP):</label><div class="grid grid-cols-2 gap-2"><input id="${attr}_min" type="number" value="${valMin}" class="value-input"><input id="${attr}_max" type="number" value="${valMax}" class="value-input"></div><div class="text-xs text-gray-500 mt-1">Min: <span id="${attr}MinDisplay">${fmt(valMin)}</span> | Max: <span id="${attr}MaxDisplay">${fmt(valMax)}</span></div></div>`;
 }
-
+function setupValueInputListeners() {
+  const minInput = document.getElementById('Value_min'); const maxInput = document.getElementById('Value_max');
+  const minDisplay = document.getElementById('ValueMinDisplay'); const maxDisplay = document.getElementById('ValueMaxDisplay');
+  const update = () => { minDisplay.textContent = '£' + Number(minInput.value).toLocaleString(); maxDisplay.textContent = '£' + Number(maxInput.value).toLocaleString(); };
+  if (minInput) { minInput.oninput = update; maxInput.oninput = update; }
+}
 function setupSliderListeners() {
   document.querySelectorAll('input[type="range"]').forEach(sl => {
     sl.oninput = () => {
@@ -394,8 +389,6 @@ function setupSliderListeners() {
     };
   });
 }
-function setupValueInputListeners() {} // No realtime update needed for inputs
-
 function buildPositionMetrics(pos){
   dynMetrics.innerHTML = '';
   (POSITION_METRICS[pos]?.display || []).forEach(m => dynMetrics.insertAdjacentHTML('beforeend', sliderBlock(m,0,99,50,75)));
@@ -416,7 +409,6 @@ function resetAll(){ buildCoreSliders(); updateUIAfterPositionChange(); }
 
 
 /* --- LOGIC HANDLERS --- */
-
 function handleSearchPlayers() {
   const q = playerNameSearch.value.trim();
   if (!q) return;
@@ -461,33 +453,121 @@ function renderPlayerCard(player, rankIndex) {
 }
 
 function loadPlayerDetails(player) {
-    switchTab('analytics');
-    document.getElementById('analyticsHeader').textContent = `${player.short_name} - Analytics`;
+    // 1. Prepare data for the Player Analytics Tab
+    const name = player.short_name || player.name;
+    document.getElementById('analyticsHeader').textContent = `${name} - Advanced Analytics`;
     
-    // Stats Table
-    let tableHtml = '<table class="stats-table w-full"><tbody>';
-    Object.entries(player.full_attributes || {}).forEach(([k, v]) => {
-        if(typeof v !== 'object') tableHtml += `<tr><th>${k.replace(/_/g,' ')}</th><td>${v}</td></tr>`;
+    // 2. Build the detailed stats table content
+    const attrs = player.full_attributes || {};
+    let attributesHtml = `<table class="stats-table w-full"><tbody>`;
+    Object.keys(attrs).forEach(k => {
+        if(!['player_face_url', 'sofifa_id'].includes(k)) {
+             const formattedKey = k.replace(/_/g, ' ');
+             attributesHtml += `<tr><th>${formattedKey}</th><td>${attrs[k] ?? '—'}</td></tr>`;
+        }
     });
-    tableHtml += '</tbody></table>';
-    document.getElementById('detailedStatsTable').innerHTML = tableHtml;
+    attributesHtml += `</tbody></table>`;
+    document.getElementById('detailedStatsTable').innerHTML = attributesHtml;
+    
+    // --- 3. NEW: MOMENTUM ANALYST AI (GATED) ---
+    // Check if user has permission
+    const entitlements = JSON.parse(sessionStorage.getItem('momentum_entitlements') || '{"analyst_ai": false}');
+    const regimeBox = document.getElementById('trainingRegime');
 
-    // AI Reports (Using data from backend)
-    const aiPlan = player.ai_training || { weakness: 'General', drills: [] };
-    const injuryRisk = (player.full_attributes?.Physicality < 65) ? "MODERATE" : "LOW";
-    const projText = (player.projections && player.projections[2] && player.projections[2].projected_overall > player.overall) ? "High Upside: + Growth Predicted" : "Stable: Peak Performance";
+    if (entitlements.analyst_ai) {
+        // ✅ USER IS AUTHORIZED: CALL API FOR REAL INSIGHTS
+        
+        // (Optional: You could call /api/momentum_analyst here for dynamic data)
+        // For now, we use the data we already loaded or generate it locally to save API calls
+        const aiPlan = player.ai_training || { weakness: 'General', drills: [] };
+        const injuryRisk = (player.full_attributes?.Physicality < 65) ? "MODERATE" : "LOW";
+        const riskColor = injuryRisk === 'LOW' ? 'green' : 'red';
+        
+        const projText = (player.projections && player.projections[2] && player.projections[2].projected_overall > player.overall) 
+            ? "High Upside: + Growth Predicted" 
+            : "Stable: Peak Performance";
 
-    document.getElementById('trainingRegime').innerHTML = `
-        <div class="report-box border-l-4 border-blue-500"><h5 class="font-bold text-white text-sm">Trajectory Analysis</h5><p class="text-xs text-gray-400 mt-1">${projText}</p></div>
-        <div class="report-box border-l-4 border-yellow-500"><h5 class="font-bold text-white text-sm">Performance Plan</h5><p class="text-xs text-yellow-400 mt-1">${aiPlan.weakness}</p><ul class="list-disc list-inside text-xs text-gray-400 ml-2 mt-1">${aiPlan.drills.map(d=>`<li>${d}</li>`).join('')}</ul></div>
-        <div class="report-box border-l-4 border-red-500"><h5 class="font-bold text-white text-sm">Injury Risk</h5><p class="text-xs text-${injuryRisk==='LOW'?'green':'red'}-400 mt-1">Risk Status: ${injuryRisk}</p></div>
-    `;
-
-    // Chart
-    const data = [player.full_attributes?.Pace||50, player.full_attributes?.Shooting||50, player.full_attributes?.Passing||50, player.full_attributes?.Dribbling||50, player.full_attributes?.Defending||50, player.full_attributes?.Physicality||50];
+        regimeBox.innerHTML = `
+            <div class="report-box border-l-4 border-blue-500">
+                <h5 class="font-bold text-white text-sm">Trajectory Analysis</h5>
+                <p class="text-xs text-gray-400 mt-1">${projText}</p>
+            </div>
+            <div class="report-box border-l-4 border-yellow-500">
+                <h5 class="font-bold text-white text-sm">Performance Plan</h5>
+                <p class="text-xs text-yellow-400 mt-1">${aiPlan.weakness}</p>
+                <ul class="list-disc list-inside text-xs text-gray-400 ml-2 mt-1">${aiPlan.drills.map(d=>`<li>${d}</li>`).join('')}</ul>
+            </div>
+            <div class="report-box border-l-4 border-red-500">
+                <h5 class="font-bold text-white text-sm">Injury Risk</h5>
+                <p class="text-xs text-${riskColor}-400 mt-1">Risk Status: ${injuryRisk}</p>
+            </div>
+        `;
+    } else {
+        // 🔒 USER IS NOT AUTHORIZED: SHOW UPSELL
+        regimeBox.innerHTML = `
+            <div class="relative bg-gray-800 p-4 rounded-lg border border-gray-600 overflow-hidden h-64">
+                <!-- Blurred Content Effect -->
+                <div class="filter blur-sm select-none opacity-50">
+                    <div class="report-box border-l-4 border-blue-500"><h5 class="font-bold text-white">Trajectory Analysis</h5><p class="text-xs">Hidden Data...</p></div>
+                    <div class="report-box border-l-4 border-yellow-500"><h5 class="font-bold text-white">Performance Plan</h5><p class="text-xs">Hidden Data...</p></div>
+                </div>
+                
+                <!-- Lock Overlay -->
+                <div class="absolute inset-0 flex flex-col items-center justify-center bg-black/60 z-10 text-center p-4">
+                    <div class="text-4xl mb-2">🔒</div>
+                    <h3 class="text-white font-bold mb-1">Momentum Analyst AI</h3>
+                    <p class="text-xs text-gray-300 mb-4">Upgrade to Tier 1 or Tier 2 (Yearly) to unlock predictive insights, injury risk, and drill plans.</p>
+                    <a href="mailto:upgrade@momentumscout.com" class="px-4 py-2 bg-green-500 hover:bg-green-600 text-black font-bold rounded-full text-xs transition">
+                        Request Upgrade
+                    </a>
+                </div>
+            </div>
+        `;
+    }
+    
+    // 4. Chart Placeholder (Always Visible)
+    const data = [
+        player.full_attributes?.Pace||50, 
+        player.full_attributes?.Shooting||50, 
+        player.full_attributes?.Passing||50, 
+        player.full_attributes?.Dribbling||50, 
+        player.full_attributes?.Defending||50, 
+        player.full_attributes?.Physicality||50
+    ];
+    // Remove old chart if exists
     if (currentChart) currentChart.destroy();
+    
+    // Create new chart
     const ctx = document.getElementById('performanceChart').getContext('2d');
-    currentChart = new Chart(ctx, { type: 'radar', data: { labels: ['PAC','SHO','PAS','DRI','DEF','PHY'], datasets: [{ label: player.short_name, data: data, backgroundColor: 'rgba(34, 197, 94, 0.2)', borderColor: '#22c55e', pointBackgroundColor: '#fff' }] }, options: { scales: { r: { suggestedMin: 30, suggestedMax: 100, grid: { color: '#374151' }, pointLabels: { color: '#fff' } } }, plugins: { legend: { labels: { color: '#fff' } } } } });
+    currentChart = new Chart(ctx, { 
+        type: 'radar', 
+        data: { 
+            labels: ['PAC','SHO','PAS','DRI','DEF','PHY'], 
+            datasets: [{ 
+                label: player.short_name, 
+                data: data, 
+                backgroundColor: 'rgba(34, 197, 94, 0.2)', 
+                borderColor: '#22c55e', 
+                pointBackgroundColor: '#fff' 
+            }] 
+        }, 
+        options: { 
+            scales: { 
+                r: { 
+                    suggestedMin: 30, 
+                    suggestedMax: 100, 
+                    grid: { color: '#374151' }, 
+                    pointLabels: { color: '#fff' } 
+                } 
+            }, 
+            plugins: { 
+                legend: { labels: { color: '#fff' } } 
+            } 
+        } 
+    });
+    
+    // Switch to the tab to show results
+    switchTab('analytics');
 }
 
 /* --- V1 Handlers --- */
