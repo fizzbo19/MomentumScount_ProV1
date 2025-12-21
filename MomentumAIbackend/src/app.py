@@ -14,6 +14,8 @@ from flask import Flask, request, jsonify, send_from_directory, make_response
 from flask_cors import CORS
 from io import StringIO
 from datetime import datetime, timedelta
+import requests
+
 
 app = Flask(__name__, static_folder="public")
 
@@ -30,31 +32,10 @@ ALLOWED_ORIGINS = [
 
 # Initialize CORS - This handles OPTIONS requests automatically
 # We allow * for paths, but restrict origins in the config
-CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS}}, supports_credentials=True)
+CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS}})
 
-# --- GLOBAL PREFLIGHT HANDLER (The Fix for 'HTTP ok status' error) ---
-@app.before_request
-def handle_preflight():
-    if request.method == "OPTIONS":
-        response = make_response()
-        origin = request.headers.get("Origin")
-        if origin in ALLOWED_ORIGINS:
-            response.headers.add("Access-Control-Allow-Origin", origin)
-            response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
-            response.headers.add("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            response.headers.add("Access-Control-Allow-Credentials", "true")
-        return response
 
-@app.after_request
-def add_cors_headers(response):
-    """Ensures headers are present on all responses, including errors."""
-    origin = request.headers.get("Origin")
-    if origin and origin in ALLOWED_ORIGINS:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    return response
+
 
 # --- GLOBAL ERROR HANDLERS ---
 @app.errorhandler(500)
@@ -346,7 +327,11 @@ def check_login_status(email):
         if raw_access is True: analyst_access = True
         elif raw_access == 'yearly_only' and plan == 'yearly': analyst_access = True
         
-        return True, "Login Verified", {"tier": tier, "analyst_ai": analyst_access}
+        return True, "Login Verified", {
+                 "tier": tier,
+                 "plan": plan,
+                 "analyst_ai": analyst_access
+        }
 
     except Exception as e:
         print(f"❌ Login Check Error: {e}")
@@ -463,23 +448,30 @@ def initialize_app():
 @app.route("/", methods=["GET"])
 def health_check(): return jsonify({"status": "online"}), 200
 
-@app.route("/api/verify_login", methods=["POST", "OPTIONS"])
+@app.route("/api/verify_login", methods=["POST"])
 def api_verify_login():
-    if request.method == "OPTIONS": return "", 200
-    try:
-        data = request.json or {}
-        email, code, portal = data.get("email", ""), data.get("code", ""), data.get("portal", "")
-        if ACCESS_CODES.get(portal) != code: return jsonify({"success": False, "message": "Invalid Access Code"}), 401
-        is_valid, msg, entitlements = check_login_status(email)
-        if not is_valid: return jsonify({"success": False, "message": msg}), 403
-        return jsonify({"success": True, "message": msg, "entitlements": entitlements})
-    except Exception as e: 
-        print(f"Login Error: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
+    data = request.json or {}
+    email = data.get("email", "")
+    code = data.get("code", "")
+    portal = data.get("portal", "")
 
-@app.route("/api/submit_demo", methods=["POST", "OPTIONS"])
+    if ACCESS_CODES.get(portal) != code:
+        return jsonify({"success": False, "message": "Invalid Access Code"}), 401
+
+    is_valid, msg, entitlements = check_login_status(email)
+
+    if not is_valid:
+        return jsonify({"success": False, "message": msg}), 403
+
+    return jsonify({
+        "success": True,
+        "message": msg,
+        "entitlements": entitlements
+    })
+
+
+@app.route("/api/submit_demo", methods=["POST"])
 def api_submit_demo():
-    if request.method == "OPTIONS": return "", 200
     try:
         data = request.json or {}
         save_signup(data)
@@ -491,10 +483,9 @@ def api_submit_demo():
         print(f"Submit Error: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/momentum_analyst", methods=["POST", "OPTIONS"])
+@app.route("/api/momentum_analyst", methods=["POST"])
 def api_momentum_analyst():
     """NEW: Generates high-value insights."""
-    if request.method == "OPTIONS": return "", 200
     try:
         data = request.json or {}
         email = data.get("email") 
@@ -515,9 +506,8 @@ def api_momentum_analyst():
         return jsonify({"success": False, "message": "Player not found."})
     except Exception as e: return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/find_players", methods=["POST", "OPTIONS"])
+@app.route("/api/find_players", methods=["POST"])
 def api_find_players():
-    if request.method == "OPTIONS": return "", 200
     try:
         data = request.json or {}
         df = player_data_baller if data.get("data_source") == 'baller' else player_data_base
@@ -564,9 +554,8 @@ def api_find_players():
         return jsonify({"players": out})
     except Exception as e: return jsonify({"players": [], "error": str(e)}), 500
 
-@app.route("/api/compare_players", methods=["POST", "OPTIONS"])
+@app.route("/api/compare_players", methods=["POST"])
 def api_compare_players():
-    if request.method == "OPTIONS": return "", 200
     try:
         data = request.json or {}
         p1_name = data.get("player1", "").lower() 
@@ -587,9 +576,8 @@ def api_compare_players():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/similar_players", methods=["POST", "OPTIONS"])
+@app.route("/api/similar_players", methods=["POST"])
 def api_similar_players():
-    if request.method == "OPTIONS": return "", 200
     try:
         data = request.json or {}
         target_name = data.get("target_player", "").lower() 
@@ -620,9 +608,8 @@ def api_similar_players():
     except Exception as e:
          return jsonify({"similar": []})
 
-@app.route("/api/search_player", methods=["POST", "OPTIONS"])
+@app.route("/api/search_player", methods=["POST"])
 def api_search_player():
-    if request.method == "OPTIONS": return "", 200
     try:
         data = request.json or {}
         query = str(data.get("player_name", "")).lower().strip()
@@ -660,9 +647,8 @@ def api_search_player():
     except Exception as e:
         return jsonify([]), 500
 
-@app.route("/api/squad_gap_analysis", methods=["POST", "OPTIONS"])
+@app.route("/api/squad_gap_analysis", methods=["POST"])
 def api_squad_gap_analysis():
-    if request.method == "OPTIONS": return "", 200
     try:
         payload = request.json or {}
         squad_csv_text = payload.get("csv_data", "")
@@ -699,9 +685,8 @@ def api_squad_gap_analysis():
     except Exception as e:
         return jsonify({"suggestions": ["Error analyzing squad data."]}), 500
 
-@app.route("/api/budget_target", methods=["POST", "OPTIONS"])
+@app.route("/api/budget_target", methods=["POST"])
 def api_budget_target():
-    if request.method == "OPTIONS": return "", 200
     try:
         payload = request.json or {}
         max_wage = safe_int(payload.get("max_wage"), 500000)
@@ -732,9 +717,8 @@ def api_budget_target():
     except Exception:
          return jsonify({"targets": []})
 
-@app.route("/api/next_match", methods=["GET", "OPTIONS"])
+@app.route("/api/next_match", methods=["GET"])
 def api_next_match():
-    if request.method == "OPTIONS": return "", 200
     if next_match_data:
         return jsonify({
             "opponent": next_match_data.get("opponent", "Unknown FC"),
@@ -765,9 +749,8 @@ def api_next_match():
         "prep_drills": ["Drill: Low-block transitions.", "Drill: Counter-attack passing channels."]
     })
 
-@app.route("/api/player_detail/<player_id>", methods=["GET", "OPTIONS"])
+@app.route("/api/player_detail/<player_id>", methods=["GET"])
 def api_player_detail(player_id):
-    if request.method == "OPTIONS": return "", 200
     return jsonify({"charts": []})
 
 @app.route("/assets/<path:filename>")
