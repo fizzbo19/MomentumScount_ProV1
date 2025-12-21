@@ -1,16 +1,16 @@
 """
-MomentumScout Backend V1.1 (Final Complete)
+MomentumScout Backend V1.1 (Final Production-Ready Core)
 - Club/Agent: Uses FC26 Data.
 - Baller League: Uses Multi-Tab Excel.
-- AI FEATURES: Squad Gap, Budget Target, Dynamic Training, Next Match, Heatmaps, Comparison.
-- SECURITY: 14-Day Trial Enforcement & Email Verification.
-- FIX: Robust CORS & Error Handling (Solves 'Network Error' / Preflight issues).
+- AI FEATURES: Squad Gap, Budget Target, Dynamic Training, Next Match.
+- SECURITY: 14-Day Trial & Email Verification.
+- FIX: Solved CORS/Preflight errors by removing manual OPTIONS handling.
 """
 import os
 import math
 import numpy as np
 import pandas as pd
-from flask import Flask, request, jsonify, send_from_directory, make_response
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from io import StringIO
 from datetime import datetime, timedelta
@@ -18,21 +18,23 @@ from datetime import datetime, timedelta
 app = Flask(__name__, static_folder="public")
 
 # --- CONFIG & ORIGINS ---
-# Define allowed origins explicitly
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://momentumscout.netlify.app") 
 ALLOWED_ORIGINS = [
     FRONTEND_URL,
     "https://momentum-ai-io.netlify.app",
     "https://momentumscout.netlify.app",
     "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5000",
     "http://127.0.0.1:5000"
 ]
 
-# Initialize CORS with specific resources and origins to handle preflight automatically
-CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS, "methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}}, supports_credentials=True)
+# Initialize CORS - This handles OPTIONS requests automatically
+CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS}}, supports_credentials=True)
 
-# Helper to add CORS headers to any response (especially errors)
+@app.after_request
 def add_cors_headers(response):
+    """Ensures headers are present on all responses, including errors."""
     origin = request.headers.get("Origin")
     if origin and origin in ALLOWED_ORIGINS:
         response.headers["Access-Control-Allow-Origin"] = origin
@@ -41,38 +43,26 @@ def add_cors_headers(response):
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return response
 
-@app.after_request
-def after_request(response):
-    return add_cors_headers(response)
-
-# --- GLOBAL ERROR HANDLERS (To ensure CORS headers on crashes) ---
+# --- GLOBAL ERROR HANDLERS ---
 @app.errorhandler(500)
 def handle_500(e):
-    response = jsonify({"success": False, "message": f"Internal Server Error: {str(e)}"})
-    response.status_code = 500
-    return add_cors_headers(response)
+    return jsonify({"success": False, "message": f"Internal Server Error: {str(e)}"}), 500
 
 @app.errorhandler(404)
 def handle_404(e):
-    response = jsonify({"success": False, "message": "Endpoint not found"})
-    response.status_code = 404
-    return add_cors_headers(response)
+    return jsonify({"success": False, "message": "Endpoint not found"}), 404
 
 # --- CONFIGURATION (SMART PATH FIX) ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Check if 'data' exists in the current directory (Root deployment)
 if os.path.exists(os.path.join(BASE_DIR, 'data')):
     DEFAULT_DATA_PATH = os.path.join(BASE_DIR, 'data')
 elif os.path.exists(os.path.join(BASE_DIR, '../data')):
-    # Fallback to one level up (Src folder deployment)
     DEFAULT_DATA_PATH = os.path.join(BASE_DIR, '../data')
 else:
-    # Final fallback, create data dir in current execution path
     DEFAULT_DATA_PATH = os.path.join(os.getcwd(), 'data')
 
 DATA_FOLDER_PATH = os.environ.get("DATA_FOLDER_PATH", DEFAULT_DATA_PATH)
 
-# Ensure data directory exists
 if not os.path.exists(DATA_FOLDER_PATH):
     try: os.makedirs(DATA_FOLDER_PATH)
     except: pass
@@ -82,13 +72,14 @@ DATA_FILENAME_BALLER = os.environ.get("DATA_FILENAME_BALLER", "baller_league_uk.
 DATA_FILENAME_NEXT_MATCH = os.environ.get("DATA_FILENAME_NEXT_MATCH", "baller_next_match.xlsx")
 DATA_FILENAME_SIGNUPS = "signups.csv" 
 DATA_FILENAME_AUDIT = "analyst_usage.csv"
+GOOGLE_SCRIPT_URL = os.environ.get("GOOGLE_SCRIPT_URL", "")
 
 # Global Data
 player_data_base = None 
 player_data_baller = None 
 next_match_data = None 
 
-# --- ENTITLEMENTS (NEW V1.1) ---
+# --- ENTITLEMENTS ---
 ENTITLEMENTS_MAP = {
     'Agent': {'analyst_ai': False, 'export_csv': False}, 
     'Tier 3': {'analyst_ai': False, 'export_csv': False}, 
@@ -100,7 +91,7 @@ ENTITLEMENTS_MAP = {
 
 ACCESS_CODES = {'club': 'SCOUT2025', 'baller': 'BALLER2025'}
 
-# --- DATABASES ---
+# --- DATABASES & CONSTANTS ---
 DRILL_DATABASE = {
     'pace': 'Speed ladders and resistance sprint training.',
     'shooting': '1v1 finishing drills and shot placement practice.',
@@ -138,10 +129,7 @@ BALLER_WEIGHTS = {
     'GK':  {'total_saves': 30, 'clean_sheets': 30}
 }
 
-POSITION_MAP = {
-    'FWD': 'ST', 'MID': 'CM', 'DEF': 'CB', 'GOALKEEPER': 'GK', 'FORWARD': 'ST',
-    'ST': 'ST', 'CM': 'CM', 'CB': 'CB', 'GK': 'GK'
-}
+POSITION_MAP = { 'FWD': 'ST', 'MID': 'CM', 'DEF': 'CB', 'GOALKEEPER': 'GK', 'FORWARD': 'ST', 'ST': 'ST', 'CM': 'CM', 'CB': 'CB', 'GK': 'GK' }
 
 # --- HELPERS ---
 def safe_int(val, default=0):
@@ -165,14 +153,14 @@ def generate_training_plan(row, position, is_baller=False):
     else:
         weights = POSITION_WEIGHTS.get(position, POSITION_WEIGHTS.get('CM', {}))
     if not weights: return plan
+    
     lowest_attr, lowest_val = None, 1000
     for attr in weights.keys():
-        if attr not in row: continue
         val = safe_float(row.get(attr, 0))
         if is_baller and val < 20: val = val * 5 
         if val < lowest_val: lowest_val, lowest_attr = val, attr
     if lowest_attr:
-        drill = DRILL_DATABASE.get(lowest_attr, DRILL_DATABASE.get(lowest_attr.split('_')[-1], "General technical drills."))
+        drill = DRILL_DATABASE.get(lowest_attr, "General technical drills.")
         readable_attr = lowest_attr.replace('_', ' ').title()
         plan['weakness'] = f"Improve {readable_attr} (Current: {int(lowest_val)})"
         plan['drills'] = [ f"Primary: {drill}", f"Secondary: High-intensity {readable_attr} simulations." ]
@@ -217,7 +205,6 @@ def generate_analyst_insight(row, tier='Tier 3', plan='monthly'):
     if tier == 'Tier 1' or (tier == 'Tier 2' and plan == 'yearly'):
         insights['negotiation_leverage'] = "High - Player contract expiring in <12 months."
         insights['scout_recommendation'] = "Immediate bid recommended within valuation range."
-
     return insights
 
 def compute_score_for_player(row, position="CM", user_weights=None, is_baller=False):
@@ -266,6 +253,7 @@ def negotiation_range(current_value: int, projected_value: int):
 # --- USER MANAGEMENT & SECURITY ---
 def save_signup(data):
     fp = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_SIGNUPS)
+    # Check if file exists, if not create
     if not os.path.exists(fp):
         df = pd.DataFrame(columns=['fullName', 'email', 'organization', 'role', 'tier', 'plan', 'timestamp'])
         df.to_csv(fp, index=False)
@@ -275,11 +263,12 @@ def save_signup(data):
         'email': data.get('email', '').strip().lower(),
         'organization': data.get('organization'),
         'role': data.get('role'),
-        'tier': data.get('tier', 'Tier 3'),
-        'plan': data.get('plan', 'monthly'),
+        'tier': data.get('tier', 'Tier 3'), # Default to lowest tier
+        'plan': data.get('plan', 'monthly'), # Default to monthly
         'timestamp': datetime.now().isoformat()
     }
     try:
+        # Check for duplicates
         df = pd.read_csv(fp)
         if 'email' in df.columns and new_row['email'] in df['email'].values:
              df.loc[df['email'] == new_row['email']] = pd.Series(new_row)
@@ -325,7 +314,6 @@ def check_login_status(email):
             if days_since > 14 and not is_exempt:
                 return False, "Trial Expired (14 Days). Upgrade required.", {}
         except Exception as e: 
-            print(f"⚠️ Date parse error for {email}: {e}")
             pass 
 
         config = ENTITLEMENTS_MAP.get(tier, ENTITLEMENTS_MAP['Tier 3'])
@@ -367,20 +355,16 @@ def _load_baller_league_data(filename):
         if merged is not None:
             merged = merged.fillna(0)
             merged['short_name'] = merged.get('name', 'Unknown')
-            # Fix Position Normalization
             raw_pos = merged.get('position', merged.get('pos', 'Baller'))
             if isinstance(raw_pos, pd.Series):
                 merged['club_position'] = raw_pos.map(lambda x: POSITION_MAP.get(str(x).upper(), 'Baller'))
             else:
                 merged['club_position'] = 'Baller'
-            
-            # Fix Momentum Score
             goals = pd.to_numeric(merged.get('goals', 0), errors='coerce').fillna(0)
             assists = pd.to_numeric(merged.get('assists', 0), errors='coerce').fillna(0)
             tackles = pd.to_numeric(merged.get('tackles', 0), errors='coerce').fillna(0)
             if 'momentum_score' not in merged.columns:
                 merged['momentum_score'] = (goals * 5) + (assists * 3) + (tackles * 2)
-            
             merged['overall'] = 50 + (merged['momentum_score'].clip(upper=50)).astype(int)
             merged['potential'] = merged['overall'] + 5
             merged['value_eur'] = merged['momentum_score'] * 10000
@@ -405,46 +389,33 @@ def _load_fc26_data(filename):
         else: df = pd.read_excel(fp) 
     except: return pd.DataFrame()
     df.columns = [clean_column_name(c) for c in df.columns]
-    
-    # Fix Numeric Coercion
     numeric_cols = [col for col in df.columns if df[col].dtype == 'object']
     for col in numeric_cols:
         try: 
             if any(x in col for x in ['overall', 'value', 'wage', 'pace', 'shooting', 'passing', 'dribbling', 'defending', 'physic', 'age', 'contract']):
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         except: pass
-        
     if "sofifa_id" in df.columns:
         def get_face_url(x):
             try:
                 if pd.isna(x): return ""
                 val = int(x)
                 return f"https://cdn.sofifa.net/players/{val//1000:03d}/{val%1000:03d}/24.webp"
-            except: return ""
+            except:
+                return ""
         df["player_face_url"] = df["sofifa_id"].apply(get_face_url)
-    
-    # Prioritize CSV face url if exists
-    if "player_face_url" in df.columns and "sofifa_id" not in df.columns:
-        # already loaded correctly from csv
-        pass 
-        
     return df
 
 def initialize_app():
     global player_data_base, player_data_baller, next_match_data
-    print("--- Loading Data ---")
     player_data_base = _load_fc26_data(DATA_FILENAME_BASE)
-    print(f"✅ Club/Agent Data Ready: {len(player_data_base)} players.")
     player_data_baller = _load_baller_league_data(DATA_FILENAME_BALLER)
-    print(f"✅ Baller League Data Ready: {len(player_data_baller)} players.")
     next_match_data = _load_next_match_data(DATA_FILENAME_NEXT_MATCH)
-    if next_match_data: print("✅ Next Match Data Loaded.")
-    
     admin_email = 'info@momentumscout.com'
     if not check_email_authorized(admin_email):
         save_signup({'fullName': 'Admin', 'email': admin_email, 'organization': 'Admin', 'role': 'Admin', 'tier': 'Tier 1', 'plan': 'yearly'})
 
-# --- API ROUTES (SIMPLE WITHOUT METHODS LIST IN DECORATOR, RELY ON CORS) ---
+# --- API ROUTES ---
 @app.route("/", methods=["GET"])
 def health_check(): return jsonify({"status": "online"}), 200
 
@@ -462,7 +433,11 @@ def api_verify_login():
 @app.route("/api/submit_demo", methods=["POST"])
 def api_submit_demo():
     try:
-        save_signup(request.json)
+        data = request.json or {}
+        save_signup(data)
+        if "script.google.com" in GOOGLE_SCRIPT_URL:
+            try: requests.post(GOOGLE_SCRIPT_URL, json=data, timeout=2)
+            except: pass 
         return jsonify({"success": True, "message": "Signup recorded."})
     except Exception as e: return jsonify({"success": False, "message": str(e)}), 500
 
@@ -474,12 +449,10 @@ def api_momentum_analyst():
         is_valid, _, entitlements = check_login_status(email)
         if not is_valid or not entitlements.get("analyst_ai"):
             return jsonify({"success": False, "message": "Upgrade Required"}), 403
-
         name = data.get("player_name")
         tier = entitlements.get("tier", "Tier 3")
         plan = "monthly" 
         log_analyst_usage(email, name)
-
         player = player_data_base[player_data_base['short_name'] == name]
         if not player.empty:
             return jsonify({"success": True, "insights": generate_analyst_insight(player.iloc[0], tier, plan)})
@@ -491,16 +464,9 @@ def api_find_players():
     try:
         data = request.json or {}
         df = player_data_baller if data.get("data_source") == 'baller' else player_data_base
-        if df is None: 
-            # Auto-Reload if empty (Backup)
-            initialize_app()
-            df = player_data_baller if data.get("data_source") == 'baller' else player_data_base
-            
-        if df is None or df.empty: return jsonify({"players": []})
-        
+        if df is None: return jsonify({"players": []})
         df = df.copy()
         
-        # Filters
         filters = data.get("filters", {})
         for key, rng in filters.items():
             col = clean_column_name(key)
@@ -508,7 +474,6 @@ def api_find_players():
             if col in df.columns and isinstance(rng, list) and len(rng) >= 2:
                  df = df[(df[col] >= float(rng[0])) & (df[col] <= float(rng[1]))]
 
-        # Scoring
         is_baller = (data.get("data_source") == 'baller')
         df['momentum_score'] = df.apply(lambda r: compute_score_for_player(r, data.get("position", "ALL"), data.get("weights"), is_baller), axis=1)
         
@@ -516,64 +481,15 @@ def api_find_players():
         for _, row in df.sort_values('momentum_score', ascending=False).head(20).iterrows():
             p_dict = row.to_dict()
             p_dict = {k: (0 if pd.isna(v) else v) for k,v in p_dict.items()}
-            
             tp = generate_training_plan(row, row.get('club_position','CM'), is_baller)
             hm = generate_heatmap_data(row, row.get('club_position','CM'))
-            
             out.append({
-                "short_name": p_dict.get('short_name'), "club_position": p_dict.get('club_position'),
-                "momentum_score": p_dict.get('momentum_score'), "value_eur": p_dict.get('value_eur', 0),
-                "player_face_url": p_dict.get('player_face_url', ''), "ai_training": tp, "heatmap_zones": hm,
+                "short_name": p_dict.get('short_name'), "club_position": p_dict.get('club_position'), "momentum_score": p_dict.get('momentum_score'),
+                "value_eur": p_dict.get('value_eur', 0), "player_face_url": p_dict.get('player_face_url', ''), "ai_training": tp, "heatmap_zones": hm,
                 "full_attributes": p_dict, "projections": project_player(row)
             })
         return jsonify({"players": out})
     except Exception as e: return jsonify({"players": [], "error": str(e)}), 500
-
-@app.route("/api/compare_players", methods=["POST"])
-def api_compare_players():
-    try:
-        data = request.json or {}
-        p1_name = data.get("player1", "").lower()
-        p2_name = data.get("player2", "").lower()
-        data_source = data.get("data_source", "base")
-        df = player_data_baller if data.get("data_source") == 'baller' else player_data_base
-        
-        p1 = df[df['short_name'].astype(str).str.lower().str.contains(p1_name)].head(1)
-        p2 = df[df['short_name'].astype(str).str.lower().str.contains(p2_name)].head(1)
-        
-        if p1.empty or p2.empty: return jsonify({"error": "Player not found"}), 404
-        
-        p1_row, p2_row = p1.iloc[0], p2.iloc[0]
-        return jsonify({
-            "player1": { "name": p1_row['short_name'], "overall": safe_int(p1_row.get('overall')), "heatmap": generate_heatmap_data(p1_row, p1_row.get('club_position')), "stats": p1_row.to_dict() },
-            "player2": { "name": p2_row['short_name'], "overall": safe_int(p2_row.get('overall')), "heatmap": generate_heatmap_data(p2_row, p2_row.get('club_position')), "stats": p2_row.to_dict() }
-        })
-    except Exception as e: return jsonify({"error": str(e)}), 500
-
-@app.route("/api/similar_players", methods=["POST"])
-def api_similar_players():
-    try:
-        data = request.json or {}
-        target_name = data.get("target_player", "").lower()
-        data_source = data.get("data_source", "base")
-        df = player_data_baller if data_source == 'baller' else player_data_base
-        target = df[df['short_name'].astype(str).str.lower().str.contains(target_name)].head(1)
-        if target.empty: return jsonify({"similar": []})
-        target_row = target.iloc[0]
-        key_stats = ['pace', 'shooting', 'passing', 'dribbling', 'defending', 'physic']
-        if data_source == 'baller': key_stats = ['goals', 'assists', 'tackles', 'total_saves']
-        candidates = df[df['club_position'] == target_row['club_position']].copy()
-        def calc_dist(row):
-            dist = 0
-            for k in key_stats: dist += abs(safe_float(row.get(k,0)) - safe_float(target_row.get(k,0)))
-            return dist
-        candidates['distance'] = candidates.apply(calc_dist, axis=1)
-        out = []
-        for _, row in candidates.sort_values('distance').head(6).iterrows():
-            if row['short_name'] != target_row['short_name']:
-                out.append({ "name": row['short_name'], "match_percentage": max(0, 100 - row['distance']), "value_eur": safe_int(row.get('value_eur', 0)) })
-        return jsonify({"similar": out})
-    except Exception as e: return jsonify({"similar": []})
 
 @app.route("/api/search_player", methods=["POST"])
 def api_search_player():
@@ -582,12 +498,10 @@ def api_search_player():
         query = str(data.get("player_name", "")).lower().strip()
         is_baller = (data.get("data_source") == 'baller')
         df = player_data_baller if is_baller else player_data_base
-        
         if df is None or df.empty or not query: return jsonify([])
         mask = df['short_name'].astype(str).str.lower().str.contains(query) 
         if 'name' in df.columns: mask |= df['name'].astype(str).str.lower().str.contains(query)
         results = df[mask].head(10)
-        
         out = []
         for _, row in results.iterrows():
             p_dict = row.to_dict()
@@ -597,11 +511,9 @@ def api_search_player():
             projections = project_player(row, years_to_project(age))
             tp = generate_training_plan(row, row.get('club_position', 'CM'), is_baller)
             hm = generate_heatmap_data(row, row.get('club_position', 'CM'))
-            
             out.append({
                 "short_name": p_dict.get('short_name'), "club_position": p_dict.get('club_position'), "momentum_score": score,
-                "projections": projections, "ai_training": tp, "heatmap_zones": hm, "value_eur": safe_int(p_dict.get('value_eur')),
-                "full_attributes": p_dict
+                "projections": projections, "ai_training": tp, "heatmap_zones": hm, "value_eur": safe_int(p_dict.get('value_eur')), "full_attributes": p_dict
             })
         return jsonify(out)
     except Exception as e: return jsonify([]), 500
@@ -656,32 +568,59 @@ def api_budget_target():
 
 @app.route("/api/next_match", methods=["GET"])
 def api_next_match():
-    if next_match_data:
-        return jsonify({
-            "opponent": next_match_data.get("opponent", "Unknown FC"),
-            "formation": next_match_data.get("formation", "4-4-2"),
-            "team_rating": next_match_data.get("rating", 75),
-            "insights": [next_match_data.get("insight_1", ""), next_match_data.get("insight_2", "")],
-            "key_threat": { "name": next_match_data.get("threat_name", "N/A"), "position": next_match_data.get("threat_pos", "FWD"), "goals": next_match_data.get("threat_goals", 0), "score": next_match_data.get("threat_score", 80) },
-            "weak_link": { "name": next_match_data.get("weakness_name", "N/A"), "position": next_match_data.get("weakness_pos", "DEF"), "tackles": next_match_data.get("weakness_stat", 0), "score": next_match_data.get("weakness_score", 50) },
-            "prep_drills": [next_match_data.get("drill_1", "General Prep"), next_match_data.get("drill_2", "Tactical Review")]
-        })
+    if next_match_data: return jsonify(next_match_data)
     return jsonify({
         "opponent": "Rebels FC (Mock)", "formation": "4-3-3 (Attack)", "team_rating": 78,
         "insights": ["Concede 65% goals from left flank.", "High defensive line vulnerability."],
-        "key_threat": {"name": "Marcus Jones", "position": "LW", "goals": 12, "score": 88.2},
-        "weak_link": {"name": "Liam Smith", "position": "CB", "tackles": 38, "score": 42.5},
+        "key_threat": { "name": "Marcus Jones", "position": "LW", "goals": 12, "score": 88.2 },
+        "weak_link": { "name": "Liam Smith", "position": "CB", "tackles": 38, "score": 42.5 },
         "prep_drills": ["Drill: Low-block transitions.", "Drill: Counter-attack passing channels."]
     })
 
-# --- INITIALIZATION (Startup) ---
+@app.route("/api/player_detail/<player_id>", methods=["GET"])
+def api_player_detail(player_id): return jsonify({"charts": []})
+
+@app.route("/api/compare_players", methods=["POST"])
+def api_compare_players():
+    try:
+        data = request.json or {}
+        p1_name, p2_name = data.get("player1", "").lower(), data.get("player2", "").lower()
+        df = player_data_baller if data.get("data_source") == 'baller' else player_data_base
+        p1 = df[df['short_name'].astype(str).str.lower().str.contains(p1_name)].head(1)
+        p2 = df[df['short_name'].astype(str).str.lower().str.contains(p2_name)].head(1)
+        if p1.empty or p2.empty: return jsonify({"error": "Player not found"}), 404
+        p1_row, p2_row = p1.iloc[0], p2.iloc[0]
+        return jsonify({
+            "player1": { "name": p1_row['short_name'], "overall": safe_int(p1_row.get('overall')), "heatmap": generate_heatmap_data(p1_row, p1_row.get('club_position')), "stats": p1_row.to_dict() },
+            "player2": { "name": p2_row['short_name'], "overall": safe_int(p2_row.get('overall')), "heatmap": generate_heatmap_data(p2_row, p2_row.get('club_position')), "stats": p2_row.to_dict() }
+        })
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+@app.route("/api/similar_players", methods=["POST"])
+def api_similar_players():
+    try:
+        data = request.json or {}
+        target_name = data.get("target_player", "").lower()
+        df = player_data_baller if data.get("data_source") == 'baller' else player_data_base
+        target = df[df['short_name'].astype(str).str.lower().str.contains(target_name)].head(1)
+        if target.empty: return jsonify({"similar": []})
+        target_row = target.iloc[0]
+        key_stats = ['pace', 'shooting', 'passing', 'dribbling', 'defending', 'physic']
+        if data.get("data_source") == 'baller': key_stats = ['goals', 'assists', 'tackles', 'total_saves']
+        candidates = df[df['club_position'] == target_row['club_position']].copy()
+        candidates['distance'] = candidates.apply(lambda r: sum(abs(safe_float(r.get(k,0)) - safe_float(target_row.get(k,0))) for k in key_stats), axis=1)
+        out = []
+        for _, row in candidates.sort_values('distance').head(6).iterrows():
+            if row['short_name'] != target_row['short_name']:
+                out.append({ "name": row['short_name'], "match_percentage": max(0, 100 - row['distance']), "value_eur": safe_int(row.get('value_eur', 0)) })
+        return jsonify({"similar": out})
+    except Exception as e: return jsonify({"similar": []})
+
+# --- INITIALIZATION ---
 try:
     print("🚀 Auto-Initializing backend data loaders...")
     initialize_app()
-except Exception as e:
-    print(f"❌ Initialization Error: {e}")
+except Exception as e: print(f"❌ Initialization Error: {e}")
 
-# --- Main ---
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
