@@ -448,26 +448,37 @@ def initialize_app():
 @app.route("/", methods=["GET"])
 def health_check(): return jsonify({"status": "online"}), 200
 
-@app.route("/api/verify_login", methods=["POST"])
+@app.route("/api/verify_login", methods=["POST", "OPTIONS"])
 def api_verify_login():
+    # ✅ Let preflight succeed before Flask error handlers
+    if request.method == "OPTIONS":
+        return "", 204
+
     data = request.json or {}
     email = data.get("email", "")
     code = data.get("code", "")
     portal = data.get("portal", "")
 
     if ACCESS_CODES.get(portal) != code:
-        return jsonify({"success": False, "message": "Invalid Access Code"}), 401
+        return jsonify({
+            "success": False,
+            "message": "Invalid Access Code"
+        }), 401
 
     is_valid, msg, entitlements = check_login_status(email)
 
     if not is_valid:
-        return jsonify({"success": False, "message": msg}), 403
+        return jsonify({
+            "success": False,
+            "message": msg
+        }), 403
 
     return jsonify({
         "success": True,
         "message": msg,
         "entitlements": entitlements
-    })
+    }), 200
+
 
 
 @app.route("/api/submit_demo", methods=["POST"])
