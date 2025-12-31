@@ -158,8 +158,17 @@ POSITION_MAP = {
 # HELPERS
 # ----------------------------------------------------
 def safe_int(val, default=0):
-    try: return int(float(val)) if pd.notnull(val) else default
-    except: return default
+    try:
+        if pd.isna(val) or val == "" or val is None: return default
+        # Convert to string and strip all whitespace
+        s_val = str(val).strip()
+        # Handle "85+2" or "80-3" by taking only the first part
+        for char in ['+', '-', ' ']:
+            if char in s_val:
+                s_val = s_val.split(char)[0]
+        return int(float(s_val))
+    except:
+        return default
 
 def safe_float(val, default=0.0):
     try: return float(val) if pd.notnull(val) else default
@@ -422,6 +431,38 @@ def _load_fc26_data(filename):
         df["player_face_url"] = df["sofifa_id"].apply(get_face_url)
     return df
 
+# ----------------------------------------------------
+# DATA LOADING (load_all_data is here)
+# ----------------------------------------------------
+player_data_base = None
+
+def load_all_data():
+    global player_data_base
+    fp = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_BASE)
+    if os.path.exists(fp):
+        try:
+            # Use encoding utf-8-sig to handle BOM markers from Excel exports
+            df = pd.read_csv(fp, encoding="utf-8-sig", low_memory=False)
+            df.columns = [clean_column_name(c) for c in df.columns]
+            
+            # Numeric cleaning for entire dataframe
+            keywords = ['overall', 'potential', 'value', 'wage', 'age', 'pace', 'shoot', 'pass', 'drib', 'defen', 'phys', 'attack', 'skill', 'movement', 'power', 'mental']
+            for col in df.columns:
+                if any(k in col for k in keywords):
+                    # 1. Regex Clean: Remove non-numeric chars except decimals and + / -
+                    df[col] = df[col].astype(str).str.replace(r'[^0-9.\-+]', '', regex=True)
+                    # 2. Split on '+' or '-' to handle boosted stats (take base number)
+                    df[col] = df[col].str.split('+').str[0].str.split('-').str[0].str.strip()
+                    # 3. Numeric Convert
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+            
+            player_data_base = df
+            print(f"✅ Master Dataset Loaded: {len(player_data_base)} players.")
+        except Exception as e:
+            print(f"❌ Load Error: {e}")
+    else:
+        print(f"⚠️ Warning: Dataset not found at {fp}")
+
 def initialize_app():
     global player_data_base, player_data_baller, next_match_data
     player_data_base = _load_fc26_data(DATA_FILENAME_BASE)
@@ -461,7 +502,7 @@ def api_submit_demo():
         data = request.json or {}
         save_signup(data)
         if "script.google.com" in GOOGLE_SCRIPT_URL:
-            try: requests.post(GOOGLE_SCRIPT_URL, json=data, timeout=2)
+            try: requests.post(GOOGLE_SCRIPT_URL, json=data, timeout=10)
             except: pass 
         return jsonify({"success": True, "message": "Signup recorded."}), 200
     except Exception as e: return jsonify({"success": False, "message": str(e)}), 500
