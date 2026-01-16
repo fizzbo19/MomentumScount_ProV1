@@ -500,25 +500,63 @@ def api_submit_demo():
     if request.method == "OPTIONS": return "", 204
     try:
         data = request.json or {}
-        save_signup(data) # Saves to local CSV for immediate login
-        
-        if GOOGLE_SCRIPT_URL:
-            print(f"DEBUG: Sending data to Google: {data.get('email')}")
-            # Explicitly set headers and use a 15s timeout
-            response = requests.post(
-                GOOGLE_SCRIPT_URL, 
-                json=data, 
-                headers={'Content-Type': 'application/json'},
-                timeout=15
-            )
-            print(f"DEBUG: Google Response Code: {response.status_code}")
-        else:
-            print("DEBUG: GOOGLE_SCRIPT_URL is not set!")
+        full_name = data.get('fullName', 'User')
+        user_email = data.get('email')
+        org = data.get('organization', 'N/A')
+        role = data.get('role', 'N/A')
 
-        return jsonify({"success": True, "message": "Signup recorded."}), 200
+        # 1. Save data to your local CSV (so they can still be verified later)
+        save_signup(data)
+
+        # 2. INTERNAL ALERT (To Your Team)
+        internal_msg = Message(
+            subject=f"🔥 New Demo Request: {org} - {full_name}",
+            recipients=["info@momentumscout.com", "fisayo.s19@gmail.com", "info@fizmaygroup.com"],
+            body=f"""
+            New Professional Lead Details:
+            -----------------------------
+            Name: {full_name}
+            Email: {user_email}
+            Organization: {org}
+            Role: {role}
+            
+            Please review the lead and prepare the environment.
+            """
+        )
+        mail.send(internal_msg)
+
+        # 3. EXTERNAL AUTO-REPLY (To the Lead)
+        customer_msg = Message(
+            subject="Welcome to MomentumScout – Request Received",
+            recipients=[user_email],
+            body=f"""
+            Dear {full_name},
+
+            Thank you for requesting a demo of MomentumScout. 
+
+            We understand the data requirements of elite {role}s and organizations like {org}. Our team is currently preparing a tailored environment for you to explore our AI-driven scouting intelligence.
+
+            What to expect next:
+            - A member of our technical team will reach out within 24 hours.
+            - We will provide you with a unique access code to the {role} dashboard.
+            - A brief walkthrough of the AI Squad Gap analysis features.
+
+            In the meantime, feel free to reply to this email if you have specific scouting requirements you'd like us to focus on during your trial.
+
+            Best regards,
+
+            The MomentumScout Team
+            Football Intelligence & Analytics
+            info@momentumscout.com
+            """
+        )
+        mail.send(customer_msg)
+
+        return jsonify({"success": True, "message": "Demo request submitted successfully."}), 200
+
     except Exception as e:
-        print(f"ERROR in submit_demo: {str(e)}")
-        return jsonify({"success": False, "message": str(e)}), 500
+        print(f"Demo Request Error: {str(e)}")
+        return jsonify({"success": False, "message": "Submission error. Please try again."}), 500
 
 @app.route("/api/momentum_analyst", methods=["POST", "OPTIONS"])
 def api_momentum_analyst():

@@ -230,27 +230,16 @@
 <!-- Signup Form Section -->
 <section id="signup" class="container mx-auto px-6 py-20">
   <div class="max-w-xl mx-auto bg-gray-800 p-8 rounded-2xl shadow-xl border border-gray-700">
-    <h2 class="text-3xl font-bold text-center text-green-400 mb-2">Request Access</h2>
-    <p class="text-center text-gray-400 mb-8">Sign up to receive your verified access code.</p>
-
-    <form id="demoForm" class="space-y-5">
-      <div>
-        <label for="fullName" class="block text-sm font-medium text-gray-300 mb-1">Full Name</label>
-        <input type="text" id="fullName" name="fullName" required placeholder="John Doe"
-               class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 text-white focus:ring-2 focus:ring-green-500 focus:outline-none">
+    <h2 class="text-3xl font-bold text-center text-green-400 mb-2">Request Professional Demo</h2>
+    <p class="text-center text-gray-400 mb-8">Our team will prepare your scouting environment and email your credentials.</p>
+    
+    <div class="pt-2">
+        <button type="submit"
+                class="w-full py-4 gradient-bg rounded-lg text-gray-900 font-bold text-lg hover:opacity-90 transition">
+                Request Demo Access
+        </button>
       </div>
-      
-      <div>
-        <label for="email" class="block text-sm font-medium text-gray-300 mb-1">Email Address</label>
-        <input type="email" id="email" name="email" required placeholder="john@club.com"
-               class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 text-white focus:ring-2 focus:ring-green-500 focus:outline-none">
-      </div>
-
-      <div>
-        <label for="organization" class="block text-sm font-medium text-gray-300 mb-1">Organization / Club</label>
-        <input type="text" id="organization" name="organization" required placeholder="e.g. Arsenal FC"
-               class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 text-white focus:ring-2 focus:ring-green-500 focus:outline-none">
-      </div>
+    </form>
 
       <!-- Role Selector -->
       <div>
@@ -441,6 +430,7 @@ if(track) {
 
 
 /* --- Signup Form Logic --- */
+/* --- Signup Form Logic --- */
 const demoForm = document.getElementById('demoForm');
 const formMessage = document.getElementById('formMessage');
 
@@ -449,14 +439,14 @@ demoForm.addEventListener('submit', async (e) => {
   
   const submitBtn = demoForm.querySelector('button[type="submit"]');
   const originalText = submitBtn.innerText;
-  submitBtn.innerText = "Submitting...";
+  submitBtn.innerText = "Processing Request...";
   submitBtn.disabled = true;
 
   const data = {
     fullName: document.getElementById('fullName').value,
     email: document.getElementById('email').value,
     organization: document.getElementById('organization').value,
-    role: document.getElementById('role').value, // Capture Role
+    role: document.getElementById('role').value,
     demoAccess: true
   };
 
@@ -474,18 +464,21 @@ demoForm.addEventListener('submit', async (e) => {
 
     if (result.success) {
       formMessage.classList.remove('hidden');
+      // Updated Success Message to reflect the 24-hour turnaround
       formMessage.innerHTML = `
-        <strong>Request Received!</strong><br>
-        Thank you, ${data.fullName}.<br>
-        We have verified you as a <strong>${data.role}</strong>.<br>
-        Your access code will be emailed shortly.
+        <div class="text-left">
+          <strong class="text-green-400 text-lg">Request Successfully Submitted</strong><br><br>
+          Thank you, ${data.fullName}. A confirmation has been sent to your email.<br><br>
+          Our team is preparing a custom dashboard for <strong>${data.organization}</strong>. 
+          Expect your verified access code within <strong>24 hours</strong>.
+        </div>
       `;
-      demoForm.reset();
+      demoForm.style.display = 'none'; // Hide the form after success
       
-      // ✅ Redirect user to welcome page on success
+      // Redirect after a longer delay so they can read the message
       setTimeout(() => { 
-    window.location.href = `welcome.html?name=${encodeURIComponent(data.fullName)}&role=${encodeURIComponent(data.role)}`; 
-}, 2000); 
+        window.location.href = `welcome.html?name=${encodeURIComponent(data.fullName)}&role=${encodeURIComponent(data.role)}`; 
+      }, 5000); 
       
     } else {
       throw new Error(result.message || 'Submission error');
@@ -493,7 +486,7 @@ demoForm.addEventListener('submit', async (e) => {
 
   } catch (error) {
     console.error("Error:", error);
-    alert("There was an error submitting the form. Please try again.");
+    alert("There was an error connecting to the server. Please check your internet or try again later.");
   } finally {
       submitBtn.innerText = originalText;
       submitBtn.disabled = false;
