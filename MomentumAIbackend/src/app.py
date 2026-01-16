@@ -18,6 +18,7 @@ from flask_cors import CORS
 from io import StringIO
 from datetime import datetime, timedelta
 import requests
+from flask_mail import Mail, Message  # Ensure this is added to your imports
 
 # ----------------------------------------------------
 # APP INIT
@@ -52,6 +53,20 @@ def apply_cors_headers(response):
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return response
+
+# ----------------------------------------------------
+# EMAIL CONFIG
+# ----------------------------------------------------
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = os.environ.get("MAIL_USERNAME") # fisayo.s19@gmail.com
+app.config['MAIL_PASSWORD'] = os.environ.get("MAIL_PASSWORD") # Your 16-char App Password
+# This ensures the "From" field says MomentumScout
+app.config['MAIL_DEFAULT_SENDER'] = ('MomentumScout Intelligence', 'info@momentumscout.com')
+
+mail = Mail(app)
+
 
 # ----------------------------------------------------
 # GLOBAL ERROR HANDLERS (CORS-SAFE)
@@ -505,7 +520,7 @@ def api_submit_demo():
         org = data.get('organization', 'N/A')
         role = data.get('role', 'N/A')
 
-        # 1. Save data to your local CSV (so they can still be verified later)
+        # 1. Save data to local CSV
         save_signup(data)
 
         # 2. INTERNAL ALERT (To Your Team)
@@ -520,36 +535,38 @@ def api_submit_demo():
             Organization: {org}
             Role: {role}
             
-            Please review the lead and prepare the environment.
+            Action: Prepare the scouting dashboard environment.
             """
         )
         mail.send(internal_msg)
 
-        # 3. EXTERNAL AUTO-REPLY (To the Lead)
+        # 3. EXTERNAL AUTO-REPLY (To the Lead - Clubs/Agents)
         customer_msg = Message(
-            subject="Welcome to MomentumScout – Request Received",
+            subject="Welcome to MomentumScout – Demo Request Received",
             recipients=[user_email],
-            body=f"""
-            Dear {full_name},
-
-            Thank you for requesting a demo of MomentumScout. 
-
-            We understand the data requirements of elite {role}s and organizations like {org}. Our team is currently preparing a tailored environment for you to explore our AI-driven scouting intelligence.
-
-            What to expect next:
-            - A member of our technical team will reach out within 24 hours.
-            - We will provide you with a unique access code to the {role} dashboard.
-            - A brief walkthrough of the AI Squad Gap analysis features.
-
-            In the meantime, feel free to reply to this email if you have specific scouting requirements you'd like us to focus on during your trial.
-
-            Best regards,
-
-            The MomentumScout Team
-            Football Intelligence & Analytics
-            info@momentumscout.com
-            """
+            reply_to="info@momentumscout.com" # Ensures replies go to business email
         )
+        
+        customer_msg.body = f"""
+Dear {full_name},
+
+Thank you for requesting a professional demo of MomentumScout. 
+
+We understand the specific data requirements of elite {role}s and organizations like {org}. Our team is currently preparing a tailored environment for you to explore our AI-driven scouting intelligence.
+
+What to expect next:
+- A member of our technical team will reach out within 24 hours.
+- We will provide you with your unique access code for the {role} portal.
+- We will include a brief guide on identifying squad gaps using your custom data.
+
+In the meantime, feel free to reply to this email if you have specific scouting requirements or league focuses you'd like us to prioritize.
+
+Best regards,
+
+The MomentumScout Team
+Football Intelligence & Analytics
+info@momentumscout.com
+        """
         mail.send(customer_msg)
 
         return jsonify({"success": True, "message": "Demo request submitted successfully."}), 200
@@ -557,7 +574,6 @@ def api_submit_demo():
     except Exception as e:
         print(f"Demo Request Error: {str(e)}")
         return jsonify({"success": False, "message": "Submission error. Please try again."}), 500
-
 @app.route("/api/momentum_analyst", methods=["POST", "OPTIONS"])
 def api_momentum_analyst():
     if request.method == "OPTIONS": return "", 204
