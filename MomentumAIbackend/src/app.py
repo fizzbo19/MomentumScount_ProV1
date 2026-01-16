@@ -500,12 +500,25 @@ def api_submit_demo():
     if request.method == "OPTIONS": return "", 204
     try:
         data = request.json or {}
-        save_signup(data)
-        if "script.google.com" in GOOGLE_SCRIPT_URL:
-            try: requests.post(GOOGLE_SCRIPT_URL, json=data, timeout=10)
-            except: pass 
+        save_signup(data) # Saves to local CSV for immediate login
+        
+        if GOOGLE_SCRIPT_URL:
+            print(f"DEBUG: Sending data to Google: {data.get('email')}")
+            # Explicitly set headers and use a 15s timeout
+            response = requests.post(
+                GOOGLE_SCRIPT_URL, 
+                json=data, 
+                headers={'Content-Type': 'application/json'},
+                timeout=15
+            )
+            print(f"DEBUG: Google Response Code: {response.status_code}")
+        else:
+            print("DEBUG: GOOGLE_SCRIPT_URL is not set!")
+
         return jsonify({"success": True, "message": "Signup recorded."}), 200
-    except Exception as e: return jsonify({"success": False, "message": str(e)}), 500
+    except Exception as e:
+        print(f"ERROR in submit_demo: {str(e)}")
+        return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route("/api/momentum_analyst", methods=["POST", "OPTIONS"])
 def api_momentum_analyst():
