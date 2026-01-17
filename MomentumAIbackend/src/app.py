@@ -57,15 +57,24 @@ def apply_cors_headers(response):
 # ----------------------------------------------------
 # EMAIL CONFIG
 # ----------------------------------------------------
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = os.environ.get("MAIL_USERNAME") # fisayo.s19@gmail.com
-app.config['MAIL_PASSWORD'] = os.environ.get("MAIL_PASSWORD") # Your 16-char App Password
-# This ensures the "From" field says MomentumScout
-app.config['MAIL_DEFAULT_SENDER'] = ('MomentumScout Intelligence', 'info@momentumscout.com')
+MAIL_USERNAME = os.environ.get("MAIL_USERNAME")
+MAIL_PASSWORD = os.environ.get("MAIL_PASSWORD")
+
+app.config["MAIL_SERVER"] = "smtp.gmail.com"
+app.config["MAIL_PORT"] = 587
+app.config["MAIL_USE_TLS"] = True
+app.config["MAIL_USERNAME"] = MAIL_USERNAME
+app.config["MAIL_PASSWORD"] = MAIL_PASSWORD
+
+# MUST match the authenticated sender when using Gmail SMTP
+app.config["MAIL_DEFAULT_SENDER"] = (
+    "MomentumScout Intelligence",
+    os.environ.get("MAIL_USERNAME"),
+)
+
 
 mail = Mail(app)
+
 
 
 # ----------------------------------------------------
@@ -512,33 +521,79 @@ def api_verify_login():
 
 @app.route("/api/submit_demo", methods=["POST", "OPTIONS"])
 def api_submit_demo():
-    if request.method == "OPTIONS": return "", 204
+    if request.method == "OPTIONS":
+        return "", 204
+
     try:
         data = request.json or {}
-        full_name = data.get('fullName', 'User')
-        user_email = data.get('email')
-        org = data.get('organization', 'N/A')
-        role = data.get('role', 'N/A')
+        full_name = data.get("fullName", "User")
+        user_email = (data.get("email") or "").strip()
+        org = data.get("organization", "N/A")
+        role = data.get("role", "N/A")
 
-        # 1. Save data to local CSV
+        if not user_email:
+            return jsonify({"success": False, "message": "Email is required."}), 400
+
+        # 1) Save data to local CSV
         save_signup(data)
 
-        # 2. INTERNAL ALERT (To Your Team)
+        # 2) INTERNAL ALERT (to you)
         internal_msg = Message(
             subject=f"🔥 New Demo Request: {org} - {full_name}",
-            recipients=["info@momentumscout.com", "fisayo.s19@gmail.com", "info@fizmaygroup.com"],
-            body=f"""
-            New Professional Lead Details:
-            -----------------------------
-            Name: {full_name}
-            Email: {user_email}
-            Organization: {org}
-            Role: {role}
-            
-            Action: Prepare the scouting dashboard environment.
-            """
+            recipients=["fisayo.s19@gmail.com"],  # keep simple while testing
+            reply_to="info@momentumscout.com",
+            body=(
+                "New Professional Lead Details:\n"
+                "-----------------------------\n"
+                f"Name: {full_name}\n"
+                f"Email: {user_email}\n"
+                f"Organization: {org}\n"
+                f"Role: {role}\n\n"
+                "Action: Prepare the scouting dashboard environment.\n"
+            ),
         )
-        mail.send(internal_msg)
+
+        # 3) EXTERNAL AUTO-REPLY (to the lead)
+        customer_msg = Message(
+            subject="Welcome to MomentumScout – Demo Request Received",
+            recipients=[user_email],
+            reply_to="info@momentumscout.com",
+            body=(
+                f"Dear {full_name},\n\n"
+                "Thank you for requesting a professional demo of MomentumScout.\n\n"
+                f"We understand the specific data requirements of elite {role}s and organizations like {org}. "
+                "Our team is currently preparing a tailored environment for you to explore our AI-driven scouting intelligence.\n\n"
+                "What to expect next:\n"
+                "- A member of our technical team will reach out.\n"
+                "- We will provide you with your unique access code.\n"
+                "- We will include a brief guide on identifying squad gaps.\n\n"
+                "Best regards,\n"
+                "The MomentumScout Team\n"
+                "info@momentumscout.com\n"
+            ),
+        )
+
+        # 4) SEND EMAILS (with clear logging)
+        try:
+            print("✅ Sending internal email...")
+            mail.send(internal_msg)
+            print("✅ Internal email sent")
+
+            print("✅ Sending customer email...")
+            mail.send(customer_msg)
+            print("✅ Customer email sent")
+
+        except Exception as e:
+            print("❌ EMAIL SEND FAILED:", repr(e))
+            return jsonify({"success": False, "message": "Email send failed."}), 500
+
+        return jsonify({"success": True, "message": "Demo request submitted successfully."}), 200
+
+    except Exception as e:
+        print("Demo Request Error:", repr(e))
+        return jsonify({"success": False, "message": "Submission error. Please try again."}), 500
+
+        
 
         # 3. EXTERNAL AUTO-REPLY (To the Lead - Clubs/Agents)
         customer_msg = Message(
