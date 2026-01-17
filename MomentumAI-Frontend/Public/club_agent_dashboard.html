@@ -145,60 +145,66 @@
 
   <body class="min-h-screen p-6">
     <script>
-   (async function verifyDashboardAccess() {
-  const email = prompt("Enter your work email:");
-  if (!email) {
-    alert("Email required.");
-    window.location.href = "/";
-    return;
-  }
-
-  const code = prompt("Enter your access code:");
-  if (!code) {
-    alert("Access code required.");
-    window.location.href = "/";
-    return;
-  }
-
-  try {
-    const resp = await fetch(
-      "https://momentumai-backend-g1ov.onrender.com/api/verify_login",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          email: email.trim(),
-          code: code.trim(),
-          portal: "club" // IMPORTANT — backend requires this
-        })
-      }
-    );
-
-    const data = await resp.json();
-
-    if (!resp.ok || !data.success) {
-      alert(data.message || "Access denied.");
-      window.location.href = "/";
-      return;
-    }
-
-    // ✅ SUCCESS — STORE ENTITLEMENTS
-    sessionStorage.setItem(
-      "momentum_entitlements",
-      JSON.stringify(data.entitlements)
-    );
-
-    console.log("✅ Access granted:", data.entitlements);
-
-  } catch (err) {
-    console.error("Login error:", err);
-    alert("Unable to verify access. Please try again.");
-    window.location.href = "/";
-  }
-})();
-
-    </script>
+        (async function verifyDashboardAccess() {
+          // If already logged in, don't prompt again
+          const existingEmail = sessionStorage.getItem("momentum_user");
+          const existingRole = sessionStorage.getItem("momentum_role");
+        
+          if (existingEmail && existingRole === "club") {
+            console.log("✅ Existing session found:", existingEmail);
+            return;
+          }
+        
+          const email = prompt("Enter your work email:");
+          if (!email) {
+            alert("Email required.");
+            window.location.href = "index.html";
+            return;
+          }
+        
+          const code = prompt("Enter your access code:");
+          if (!code) {
+            alert("Access code required.");
+            window.location.href = "index.html";
+            return;
+          }
+        
+          try {
+            const resp = await fetch(
+              "https://momentumai-backend-g1ov.onrender.com/api/verify_login",
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  email: email.trim(),
+                  code: code.trim(),
+                  portal: "club"
+                })
+              }
+            );
+        
+            const data = await resp.json();
+        
+            if (!resp.ok || !data.success) {
+              alert(data.message || "Access denied.");
+              window.location.href = "index.html";
+              return;
+            }
+        
+            sessionStorage.setItem("momentum_user", email.trim());
+            sessionStorage.setItem("momentum_role", "club");
+            sessionStorage.setItem("momentum_entitlements", JSON.stringify(data.entitlements || {}));
+        
+            console.log("✅ Access granted:", data.entitlements);
+        
+          } catch (err) {
+            console.error("Login error:", err);
+            alert("Unable to verify access. Please try again.");
+            window.location.href = "index.html";
+          }
+        })();
+        </script>
+        
 
     <div id="playerModal" class="modal">
       <div
@@ -690,35 +696,54 @@
       }
 
       async function handleBudgetTargeting() {
-    const list = document.getElementById("targetResults");
-    list.innerHTML = '<div class="flex justify-center py-10"><div class="spinner"></div></div>';
-    
-    try {
-        const data = await safePost("/budget_target", { 
-            max_wage: document.getElementById("maxWage").value, 
-            contract_year: document.getElementById("contractYear").value 
-        });
-        
-        currentTargets = data.targets || [];
-        if (currentTargets.length === 0) {
-            list.innerHTML = '<p class="text-center text-gray-500 mt-10">No players found matching these financial constraints.</p>';
-            return;
-        }
+  const list = document.getElementById("targetResults");
+  list.innerHTML =
+    '<div class="flex justify-center py-10"><div class="spinner"></div></div>';
 
-        list.innerHTML = currentTargets.map(p => `
-            <div class="flex justify-between items-center p-3 bg-gray-800 rounded border border-gray-700 mb-2">
-                <div>
-                    <div class="text-sm font-bold text-green-400">${p.short_name}</div>
-                    <div class="text-xs text-gray-500">Exp: ${p.contract_end} | ${fmtGBPFromEur(p.wage_yearly)}/yr</div>
-                </div>
-                <div class="text-lg font-bold text-white">${p.overall}</div>
-            </div>
-        `).join("");
-    } catch (err) {
-        console.error("Targeting Error:", err);
-        list.innerHTML = '<p class="text-red-500 text-center mt-10">Error connecting to scouting server.</p>';
+  try {
+    const data = await safePost("/budget_target", {
+      max_wage: document.getElementById("maxWage").value,
+      contract_year: document.getElementById("contractYear").value
+    });
+
+    // ✅ NORMALIZE TARGET DATA
+    currentTargets = (data.targets || []).map((p) => ({
+      ...p,
+      full_attributes: p.full_attributes || p.full_stats || {}
+    }));
+
+    if (currentTargets.length === 0) {
+      list.innerHTML =
+        '<p class="text-center text-gray-500 mt-10">No players found matching these financial constraints.</p>';
+      return;
     }
+
+    // ✅ RENDER TARGETS (clickable)
+    list.innerHTML = currentTargets
+      .map(
+        (p, i) => `
+        <div
+          class="flex justify-between items-center p-3 bg-gray-800 rounded border border-gray-700 mb-2 cursor-pointer hover:border-green-500"
+          onclick="loadPlayerDetails(currentTargets[${i}]); switchTab('analytics');"
+        >
+          <div>
+            <div class="text-sm font-bold text-green-400">${p.short_name}</div>
+            <div class="text-xs text-gray-500">
+              Exp: ${p.contract_end} | ${fmtGBPFromEur(p.wage_yearly)}/yr
+            </div>
+          </div>
+          <div class="text-lg font-bold text-white">${p.overall}</div>
+        </div>
+      `
+      )
+      .join("");
+  } catch (err) {
+    console.error("Targeting Error:", err);
+    list.innerHTML =
+      '<p class="text-red-500 text-center mt-10">Error connecting to scouting server.</p>';
+  }
 }
+
 
       function renderPlayerCard(player) {
         const card = document.createElement("div");
@@ -973,8 +998,9 @@ function sliderBlock(id, min, max, vMin, vMax) {
 }
 
 function compareFromShortlist(index) {
-  const player = currentTargets[index];
-  if (!player) return;
+const saved = JSON.parse(localStorage.getItem("saved_targets") || "[]");
+const player = saved[index] || currentTargets[index];
+if (!player) return;
 
   // If analytics tab is hidden, load first player normally
   if (document.getElementById("analytics").classList.contains("hidden")) {
@@ -1015,9 +1041,58 @@ function compareFromShortlist(index) {
   }
 }
 
+/* =========================
+   FINAL BOOTSTRAP (REQUIRED)
+   Put this at the END of the script
+   ========================= */
 
+   document.addEventListener("DOMContentLoaded", () => {
+  // --- Bind Elements ---
+  posSelect = document.getElementById("position");
+  coreSliders = document.getElementById("coreSliders");
+  dynMetrics = document.getElementById("dynamicMetrics");
+  weightContainer = document.getElementById("weightingSliders");
+  recommendations = document.getElementById("recommendations");
 
+  playerSearchResults = document.getElementById("playerSearchResults");
+  searchStatus = document.getElementById("searchStatus");
+
+  modal = document.getElementById("playerModal");
+  modalInner = document.getElementById("modalInner");
+  closeModal = document.getElementById("closeModal");
+
+  findBtn = document.getElementById("findPlayersBtn");
+  resetBtn = document.getElementById("resetBtn");
+  searchBtn = document.getElementById("searchPlayerBtn");
+
+  analyzeSquadBtn = document.getElementById("analyzeSquadBtn");
+  targetPlayersBtn = document.getElementById("targetPlayersBtn");
+
+  squadPositionSelect = document.getElementById("squadPositionSelect");
+
+  detailedStatsTable = document.getElementById("detailedStatsTable");
+  trainingRegime = document.getElementById("trainingRegime");
+
+  // --- Safety checks (helps debugging) ---
+  if (!posSelect || !coreSliders || !recommendations) {
+    console.error("❌ Missing core DOM elements — check your HTML ids.");
+    return;
+  }
+
+  // --- Build initial UI ---
+  try {
+    buildCoreSliders();                 // must exist earlier in your file
+    buildPositionMetrics(posSelect.value);
+    buildWeightSliders(posSelect.value);
+    attachSliderListeners();
+    setupEventListeners();
+    checkPremiumStatus();
+  } catch (e) {
+    console.error("❌ Bootstrap failed:", e);
+  }
+});
 
     </script>
+    
  </body>
   </html>

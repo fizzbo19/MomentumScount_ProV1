@@ -71,6 +71,9 @@ app.config["MAIL_DEFAULT_SENDER"] = (
     "MomentumScout Intelligence",
     os.environ.get("MAIL_USERNAME"),
 )
+if not MAIL_USERNAME or not MAIL_PASSWORD:
+    print("❌ Missing MAIL_USERNAME or MAIL_PASSWORD env vars")
+
 
 
 mail = Mail(app)
@@ -233,50 +236,65 @@ def check_login_status(email):
     fp = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_SIGNUPS)
     if not os.path.exists(fp): return False, "No users found.", {}
 
+def check_login_status(email):
+    fp = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_SIGNUPS)
+    if not os.path.exists(fp):
+        return False, "No users found.", {}
+
     try:
         df = pd.read_csv(fp)
-        user_row = df[df['email'].str.strip().str.lower() == email.strip().lower()]
-        
-        if user_row.empty: return False, "Email not recognized.", {}
+
+        # Make sure email column exists
+        if "email" not in df.columns:
+            return False, "System Error: signups.csv missing 'email' column.", {}
+
+        user_row = df[df["email"].astype(str).str.strip().str.lower() == email.strip().lower()]
+
+        if user_row.empty:
+            return False, "Email not recognized.", {}
 
         user = user_row.iloc[-1]
-        tier = user.get('tier', 'Tier 3')
-        plan = user.get('plan', 'monthly')
-        signup_str = user.get('timestamp', datetime.now().isoformat())
+        tier = user.get("tier", "Tier 3")
+        plan = user.get("plan", "monthly")
+        signup_str = user.get("timestamp", datetime.now().isoformat())
 
         # 14-Day Trial Check
         try:
             signup_date = pd.to_datetime(signup_str).to_pydatetime()
             days_since = (datetime.now() - signup_date).days
-            is_exempt = (tier == 'Tier 1') or (plan == 'yearly')
+            is_exempt = (tier == "Tier 1") or (plan == "yearly")
             if days_since > 14 and not is_exempt:
                 return False, "Trial Expired (14 Days). Upgrade required.", {}
-        except: pass 
+        except Exception:
+            # If timestamp parsing fails, don't block login
+            pass
 
-        # Entitlements
-        config = ENTITLEMENTS_MAP.get(tier, ENTITLEMENTS_MAP['Tier 3'])
+        # -----------------------------
+        # ENTITLEMENTS (FIXED INDENT)
+        # -----------------------------
+        config = ENTITLEMENTS_MAP.get(tier, ENTITLEMENTS_MAP["Tier 3"])
+
+        # Analyst AI rule
         analyst_access = False
-        raw_access = config.get('analyst_ai', False)
-        if raw_access is True: analyst_access = True
-        elif raw_access == 'yearly_only' and plan == 'yearly': analyst_access = True
-        
+        raw_access = config.get("analyst_ai", False)
+        if raw_access is True:
+            analyst_access = True
+        elif raw_access == "yearly_only" and plan == "yearly":
+            analyst_access = True
+
+        # Export CSV/PDF rule
+        export_access = bool(config.get("export_csv", False))
+
         return True, "Login Verified", {
-                      "tier": tier,
-                     "plan": plan,
-                      "analyst_ai": analyst_access
-            }
+            "tier": tier,
+            "plan": plan,
+            "analyst_ai": analyst_access,
+            "export_csv": export_access
+        }
 
     except Exception as e:
         return False, f"System Error: {str(e)}", {}
 
-def log_analyst_usage(email, player_name):
-    fp = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_AUDIT)
-    if not os.path.exists(fp):
-        pd.DataFrame(columns=['email', 'player', 'timestamp']).to_csv(fp, index=False)
-    try:
-        new_row = {'email': email, 'player': player_name, 'timestamp': datetime.now().isoformat()}
-        pd.DataFrame([new_row]).to_csv(fp, mode='a', header=False, index=False)
-    except: pass
 
 # --- AI GENERATORS ---
 def generate_training_plan(row, position, is_baller=False):
@@ -492,9 +510,19 @@ def initialize_app():
     player_data_base = _load_fc26_data(DATA_FILENAME_BASE)
     player_data_baller = _load_baller_league_data(DATA_FILENAME_BALLER)
     next_match_data = _load_next_match_data(DATA_FILENAME_NEXT_MATCH)
-    admin_email = 'info@momentumscout.com'
-    if not check_email_authorized(admin_email):
-        save_signup({'fullName': 'Admin', 'email': admin_email, 'organization': 'Admin', 'role': 'Admin', 'tier': 'Tier 1', 'plan': 'yearly'})
+
+    # Ensure admin exists in signups.csv
+    admin_email = "info@momentumscout.com"
+    is_valid, _, _ = check_login_status(admin_email)
+    if not is_valid:
+        save_signup({
+            "fullName": "Admin",
+            "email": admin_email,
+            "organization": "Admin",
+            "role": "Admin",
+            "tier": "Tier 1",
+            "plan": "yearly"
+        })
 
 # ----------------------------------------------------
 # ROUTES
@@ -537,11 +565,11 @@ def api_submit_demo():
         # 1) Save data to local CSV
         save_signup(data)
 
-        # 2) INTERNAL ALERT (to you)
+        # 2) INTERNAL ALERT (send to YOU)
         internal_msg = Message(
             subject=f"🔥 New Demo Request: {org} - {full_name}",
-            recipients=["fisayo.s19@gmail.com"],  # keep simple while testing
-            reply_to="info@momentumscout.com",
+            recipients=["info@momentumscout.com"],  # <-- IMPORTANT: where you want it
+            reply_to=user_email,                    # so you can reply directly to the lead
             body=(
                 "New Professional Lead Details:\n"
                 "-----------------------------\n"
@@ -553,7 +581,7 @@ def api_submit_demo():
             ),
         )
 
-        # 3) EXTERNAL AUTO-REPLY (to the lead)
+        # 3) EXTERNAL AUTO-REPLY (send to the lead)
         customer_msg = Message(
             subject="Welcome to MomentumScout – Demo Request Received",
             recipients=[user_email],
@@ -561,25 +589,20 @@ def api_submit_demo():
             body=(
                 f"Dear {full_name},\n\n"
                 "Thank you for requesting a professional demo of MomentumScout.\n\n"
-                f"We understand the specific data requirements of elite {role}s and organizations like {org}. "
-                "Our team is currently preparing a tailored environment for you to explore our AI-driven scouting intelligence.\n\n"
-                "What to expect next:\n"
-                "- A member of our technical team will reach out.\n"
-                "- We will provide you with your unique access code.\n"
-                "- We will include a brief guide on identifying squad gaps.\n\n"
+                "We’ve received your request and our team will prepare your environment.\n\n"
                 "Best regards,\n"
-                "The MomentumScout Team\n"
+                "MomentumScout Team\n"
                 "info@momentumscout.com\n"
             ),
         )
 
-        # 4) SEND EMAILS (with clear logging)
+        # 4) Send emails with clear logging
         try:
-            print("✅ Sending internal email...")
+            print("✅ Sending internal email to info@momentumscout.com ...")
             mail.send(internal_msg)
             print("✅ Internal email sent")
 
-            print("✅ Sending customer email...")
+            print("✅ Sending customer confirmation email ...")
             mail.send(customer_msg)
             print("✅ Customer email sent")
 
@@ -593,42 +616,7 @@ def api_submit_demo():
         print("Demo Request Error:", repr(e))
         return jsonify({"success": False, "message": "Submission error. Please try again."}), 500
 
-        
 
-        # 3. EXTERNAL AUTO-REPLY (To the Lead - Clubs/Agents)
-        customer_msg = Message(
-            subject="Welcome to MomentumScout – Demo Request Received",
-            recipients=[user_email],
-            reply_to="info@momentumscout.com" # Ensures replies go to business email
-        )
-        
-        customer_msg.body = f"""
-Dear {full_name},
-
-Thank you for requesting a professional demo of MomentumScout. 
-
-We understand the specific data requirements of elite {role}s and organizations like {org}. Our team is currently preparing a tailored environment for you to explore our AI-driven scouting intelligence.
-
-What to expect next:
-- A member of our technical team will reach out within 24 hours.
-- We will provide you with your unique access code for the {role} portal.
-- We will include a brief guide on identifying squad gaps using your custom data.
-
-In the meantime, feel free to reply to this email if you have specific scouting requirements or league focuses you'd like us to prioritize.
-
-Best regards,
-
-The MomentumScout Team
-Football Intelligence & Analytics
-info@momentumscout.com
-        """
-        mail.send(customer_msg)
-
-        return jsonify({"success": True, "message": "Demo request submitted successfully."}), 200
-
-    except Exception as e:
-        print(f"Demo Request Error: {str(e)}")
-        return jsonify({"success": False, "message": "Submission error. Please try again."}), 500
 @app.route("/api/momentum_analyst", methods=["POST", "OPTIONS"])
 def api_momentum_analyst():
     if request.method == "OPTIONS": return "", 204
