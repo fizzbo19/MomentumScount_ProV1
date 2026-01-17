@@ -810,16 +810,14 @@
         handleLoadSavedTargets();
       }
 
-     /* =========================
+  /* =========================
    PDF + PREMIUM UI (KEEP THIS VERSION)
    ========================= */
 function handleExportPDF() {
-  // 1. SECURITY CHECK: Get entitlements from session
   const entitlements = JSON.parse(
     sessionStorage.getItem("momentum_entitlements") || '{"export_csv": false}'
   );
 
-  // 2. GATE LOGIC
   if (!entitlements.export_csv) {
     alert(
       "🔒 PREMIUM FEATURE: PDF Scouting Reports are only available for Tier 1 & Tier 2 subscribers. Please contact info@momentumscout.com to upgrade your plan."
@@ -827,7 +825,6 @@ function handleExportPDF() {
     return;
   }
 
-  // 3. AUTHORIZED LOGIC
   const playerName = document
     .getElementById("analyticsHeader")
     .textContent.split("-")[0]
@@ -926,6 +923,51 @@ function sliderBlock(id, min, max, vMin, vMax) {
     </div>
   `;
 }
+
+function compareFromShortlist(index) {
+  const player = currentTargets[index];
+  if (!player) return;
+
+  // If analytics tab is hidden, load first player normally
+  if (document.getElementById("analytics").classList.contains("hidden")) {
+    loadPlayerDetails(player);
+    alert(
+      "Primary player loaded. Click another player's ⚡ icon to overlay comparison data."
+    );
+    return;
+  }
+
+  // Add comparison dataset to existing radar chart
+  if (currentChart) {
+    const stats = player.full_attributes || {};
+
+    const comparisonData = [
+      stats.pace || 50,
+      stats.shooting || 50,
+      stats.passing || 50,
+      stats.dribbling || 50,
+      stats.defending || 50,
+      stats.physic || stats.physicality || 50,
+    ];
+
+    currentChart.data.datasets.push({
+      label: `${player.short_name} (Comparison)`,
+      data: comparisonData,
+      backgroundColor: "rgba(250, 204, 21, 0.2)",
+      borderColor: "#facc15",
+      pointBackgroundColor: "#fff",
+    });
+
+    currentChart.update();
+
+    document.getElementById("analyticsHeader").textContent =
+      "Player Head-to-Head Comparison";
+
+    switchTab("analytics");
+  }
+}
+
+
 
 
     </script>
