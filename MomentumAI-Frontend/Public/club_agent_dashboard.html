@@ -145,11 +145,59 @@
 
   <body class="min-h-screen p-6">
     <script>
-      const pwd = prompt("Enter access code:");
-      if (pwd !== "SCOUT2025") {
-        alert("Access denied.");
-        window.location.href = "/index.html";
+   (async function verifyDashboardAccess() {
+  const email = prompt("Enter your work email:");
+  if (!email) {
+    alert("Email required.");
+    window.location.href = "/";
+    return;
+  }
+
+  const code = prompt("Enter your access code:");
+  if (!code) {
+    alert("Access code required.");
+    window.location.href = "/";
+    return;
+  }
+
+  try {
+    const resp = await fetch(
+      "https://momentumai-backend-g1ov.onrender.com/api/verify_login",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          email: email.trim(),
+          code: code.trim(),
+          portal: "club" // IMPORTANT — backend requires this
+        })
       }
+    );
+
+    const data = await resp.json();
+
+    if (!resp.ok || !data.success) {
+      alert(data.message || "Access denied.");
+      window.location.href = "/";
+      return;
+    }
+
+    // ✅ SUCCESS — STORE ENTITLEMENTS
+    sessionStorage.setItem(
+      "momentum_entitlements",
+      JSON.stringify(data.entitlements)
+    );
+
+    console.log("✅ Access granted:", data.entitlements);
+
+  } catch (err) {
+    console.error("Login error:", err);
+    alert("Unable to verify access. Please try again.");
+    window.location.href = "/";
+  }
+})();
+
     </script>
 
     <div id="playerModal" class="modal">
