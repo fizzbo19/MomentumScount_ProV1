@@ -750,7 +750,10 @@ def api_budget_target():
         # Ensure we use the exact column names from your cleaned CSV
         # Cleaning logic usually makes it 'wage_eur' or 'wage'
         wage_col = 'wage_eur' if 'wage_eur' in df.columns else 'wage'
+    
+        # Force numeric conversion for the year to prevent filter crashes
         year_col = 'club_contract_valid_until_year' if 'club_contract_valid_until_year' in df.columns else 'contract_valid_until'
+        df[year_col] = pd.to_numeric(df[year_col], errors='coerce').fillna(0).astype(int)
 
         # Filter Logic
         # Note: If your CSV wage is weekly, we multiply by 52 for annual
