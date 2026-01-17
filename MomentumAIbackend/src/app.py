@@ -744,20 +744,40 @@ def api_budget_target():
         payload = request.json or {}
         max_wage = safe_int(payload.get("max_wage"), 500000)
         contract_year = safe_int(payload.get("contract_year"), 2026)
+        
         df = player_data_base.copy()
-        contract_col = 'contract_valid_until'
-        if 'club_contract_valid_until_year' in df.columns: contract_col = 'club_contract_valid_until_year'
-        df = df[ (df['wage_eur'] * 52) <= max_wage ]
-        if contract_col in df.columns: df = df[df[contract_col] <= contract_year]
-        targets = df.sort_values(by='overall', ascending=False).head(10)
+        
+        # Ensure we use the exact column names from your cleaned CSV
+        # Cleaning logic usually makes it 'wage_eur' or 'wage'
+        wage_col = 'wage_eur' if 'wage_eur' in df.columns else 'wage'
+        year_col = 'club_contract_valid_until_year' if 'club_contract_valid_until_year' in df.columns else 'contract_valid_until'
+
+        # Filter Logic
+        # Note: If your CSV wage is weekly, we multiply by 52 for annual
+        df = df[ (df[wage_col] * 52) <= max_wage ]
+        
+        if year_col in df.columns:
+            df = df[df[year_col] <= contract_year]
+            
+        targets = df.sort_values(by='overall', ascending=False).head(20)
+        
+        # Store these results in a global or session to allow for export
+        # For now, return them
         out = []
         for _, row in targets.iterrows():
             out.append({
-                "short_name": row['short_name'], "club_position": row['club_position'], "overall": row['overall'], "value_eur": row['value_eur'],
-                "wage_yearly": row['wage_eur'] * 52, "contract_end": int(row.get(contract_col, 0))
+                "short_name": row['short_name'], 
+                "club_position": row['club_position'], 
+                "overall": row['overall'], 
+                "value_eur": row.get('value_eur', 0),
+                "wage_yearly": row[wage_col] * 52, 
+                "contract_end": int(row.get(year_col, 0)),
+                "full_stats": row.to_dict() # Needed for export
             })
         return jsonify({"targets": out}), 200
-    except Exception: return jsonify({"targets": []}), 500
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({"targets": [], "error": str(e)}), 500
 
 @app.route("/api/next_match", methods=["GET", "OPTIONS"])
 def api_next_match():
