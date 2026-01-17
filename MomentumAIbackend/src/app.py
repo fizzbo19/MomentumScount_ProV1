@@ -19,6 +19,8 @@ from io import StringIO
 from datetime import datetime, timedelta
 import requests
 from flask_mail import Mail, Message  # Ensure this is added to your imports
+from flask import make_response
+
 
 # ----------------------------------------------------
 # APP INIT
@@ -41,7 +43,19 @@ ALLOWED_ORIGINS = [
 ]
 
 # Flask-CORS (baseline)
-CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS}}, supports_credentials=True)
+CORS(
+    app,
+    resources={r"/*": {"origins": ALLOWED_ORIGINS}},
+    supports_credentials=True,
+    methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
+)
+
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        resp = make_response("", 204)
+        return apply_cors_headers(resp)
 
 # 🔒 FORCE CORS HEADERS ON *ALL* RESPONSES (incl. errors)
 @app.after_request
@@ -49,10 +63,12 @@ def apply_cors_headers(response):
     origin = request.headers.get("Origin")
     if origin and origin in ALLOWED_ORIGINS:
         response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return response
+
 
 # ----------------------------------------------------
 # EMAIL CONFIG
