@@ -20,6 +20,8 @@ from datetime import datetime, timedelta
 import requests
 from flask_mail import Mail, Message  # Ensure this is added to your imports
 from flask import make_response
+import secrets
+
 
 
 # ----------------------------------------------------
@@ -39,7 +41,10 @@ ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5000",
-    "http://127.0.0.1:5000"
+    "http://127.0.0.1:5000",
+    "https://momentumscout.com",
+    "https://www.momentumscout.com",
+
 ]
 
 # Flask-CORS (baseline)
@@ -51,11 +56,19 @@ CORS(
     allow_headers=["Content-Type", "Authorization"],
 )
 
+
 @app.before_request
 def handle_preflight():
     if request.method == "OPTIONS":
         resp = make_response("", 204)
-        return apply_cors_headers(resp)
+        origin = request.headers.get("Origin")
+        if origin in ALLOWED_ORIGINS:
+            resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers["Access-Control-Allow-Credentials"] = "true"
+            resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+            resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        return resp
+
 
 # 🔒 FORCE CORS HEADERS ON *ALL* RESPONSES (incl. errors)
 @app.after_request
@@ -69,6 +82,9 @@ def apply_cors_headers(response):
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return response
 
+def make_access_code(length=8):
+    # URL-safe, uppercase letters+digits
+    return secrets.token_urlsafe(6).upper().replace('-', '')[:length]
 
 # ----------------------------------------------------
 # EMAIL CONFIG
@@ -76,9 +92,11 @@ def apply_cors_headers(response):
 MAIL_USERNAME = os.environ.get("MAIL_USERNAME")
 MAIL_PASSWORD = os.environ.get("MAIL_PASSWORD")
 
-app.config["MAIL_SERVER"] = "smtp.gmail.com"
+app.config["MAIL_SERVER"] = os.environ.get("MAIL_SERVER", "smtp.hostinger.com")
 app.config["MAIL_PORT"] = 587
 app.config["MAIL_USE_TLS"] = True
+app.config["MAIL_USE_TLS"] = os.environ.get("MAIL_USE_TLS", "True") == "True"
+app.config["MAIL_USE_SSL"] = os.environ.get("MAIL_USE_SSL", "False") == "True"
 app.config["MAIL_USERNAME"] = MAIL_USERNAME
 app.config["MAIL_PASSWORD"] = MAIL_PASSWORD
 
@@ -224,29 +242,34 @@ def clean_column_name(col_name):
 def save_signup(data):
     fp = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_SIGNUPS)
     if not os.path.exists(fp):
-        df = pd.DataFrame(columns=['fullName', 'email', 'organization', 'role', 'tier', 'plan', 'timestamp'])
+        df = pd.DataFrame(columns=['fullName', 'email', 'organization', 'role', 'tier', 'plan', 'timestamp', 'access_code'])
         df.to_csv(fp, index=False)
     
+    email_norm = (data.get('email') or '').strip().lower()
     new_row = {
         'fullName': data.get('fullName'),
-        'email': data.get('email', '').strip().lower(),
+        'email': email_norm,
         'organization': data.get('organization'),
         'role': data.get('role'),
-        'tier': data.get('tier', 'Tier 3'), 
-        'plan': data.get('plan', 'monthly'), 
-        'timestamp': datetime.now().isoformat()
+        'tier': data.get('tier', 'Tier 3'),
+        'plan': data.get('plan', 'monthly'),
+        'timestamp': datetime.now().isoformat(),
+        'access_code': data.get('access_code', '')
     }
     try:
-        # Check duplicates
         df = pd.read_csv(fp)
-        if 'email' in df.columns and new_row['email'] in df['email'].values:
-             df.loc[df['email'] == new_row['email']] = pd.Series(new_row)
-             df.to_csv(fp, index=False)
+        # update existing by email, or append
+        if 'email' in df.columns and email_norm in df['email'].values:
+            df.loc[df['email'] == email_norm, list(new_row.keys())] = pd.Series(new_row)
+            df.to_csv(fp, index=False)
         else:
-             df_new = pd.DataFrame([new_row])
-             df_new.to_csv(fp, mode='a', header=False, index=False)
+            df_new = pd.DataFrame([new_row])
+            df_new.to_csv(fp, mode='a', header=False, index=False)
         return True
-    except: return False
+    except Exception as e:
+        print("Save signup failed:", e)
+        return False
+
 
 def check_login_status(email):
     fp = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_SIGNUPS)
@@ -551,80 +574,109 @@ def health():
 def api_verify_login():
     if request.method == "OPTIONS": return "", 204
     data = request.json or {}
-    email, code, portal = data.get("email", ""), data.get("code", ""), data.get("portal", "")
-    
-    if ACCESS_CODES.get(portal) != code: 
-        return jsonify({"success": False, "message": "Invalid Access Code"}), 401
-    
-    is_valid, msg, entitlements = check_login_status(email)
-    
-    if not is_valid: 
-        return jsonify({"success": False, "message": msg}), 403
-    
-    return jsonify({"success": True, "message": msg, "entitlements": entitlements}), 200
+    email = (data.get("email") or "").strip().lower()
+    code = data.get("code", "")
+    portal = data.get("portal", "")
+
+    # 1) If portal static code matches, keep old behaviour
+    if ACCESS_CODES.get(portal) == code:
+        is_valid, msg, entitlements = check_login_status(email)
+        if not is_valid: return jsonify({"success": False, "message": msg}), 403
+        return jsonify({"success": True, "message": msg, "entitlements": entitlements}), 200
+
+    # 2) Otherwise check per-user access_code in signups.csv
+    fp = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_SIGNUPS)
+    if not os.path.exists(fp):
+        return jsonify({"success": False, "message": "No signups found."}), 403
+    try:
+        df = pd.read_csv(fp)
+        match = df[(df['email'].astype(str).str.strip().str.lower() == email) & (df['access_code'].astype(str).str.strip() == str(code).strip())]
+        if not match.empty:
+            # allow login; get entitlements via saved tier/plan
+            user = match.iloc[-1]
+            tier = user.get('tier', 'Tier 3')
+            plan = user.get('plan', 'monthly')
+            # reuse existing logic to build entitlements
+            config = ENTITLEMENTS_MAP.get(tier, ENTITLEMENTS_MAP['Tier 3'])
+            analyst_access = False
+            raw_access = config.get('analyst_ai', False)
+            if raw_access is True: analyst_access = True
+            elif raw_access == 'yearly_only' and plan == 'yearly': analyst_access = True
+            entitlements = {"tier": tier, "plan": plan, "analyst_ai": analyst_access, "export_csv": bool(config.get("export_csv", False))}
+            return jsonify({"success": True, "message": "Login Verified", "entitlements": entitlements}), 200
+        else:
+            return jsonify({"success": False, "message": "Invalid access code or email."}), 403
+    except Exception as e:
+        return jsonify({"success": False, "message": f"System Error: {str(e)}"}), 500
 
 @app.route("/api/submit_demo", methods=["POST", "OPTIONS"])
 def api_submit_demo():
-    if request.method == "OPTIONS":
-        return "", 204
-
+    if request.method == "OPTIONS": return "", 204
     try:
         data = request.json or {}
         full_name = data.get("fullName", "User")
-        user_email = (data.get("email") or "").strip()
+        user_email = (data.get("email") or "").strip().lower()
         org = data.get("organization", "N/A")
         role = data.get("role", "N/A")
 
         if not user_email:
-            return jsonify({"success": False, "message": "Email is required."}), 400
+            return jsonify({"success": False, "message": "Email required."}), 400
 
-        # 1) Save data to local CSV
-        save_signup(data)
+        # generate unique access code and add to data
+        access_code = make_access_code(8)
+        data['access_code'] = access_code
 
-        # 2) INTERNAL ALERT (send to YOU)
+        # save locally to CSV
+        saved = save_signup(data)
+        if not saved:
+            print("Warning: save_signup returned False")
+
+        # optional: push to Google Sheet if configured
+        gs_url = os.environ.get("GOOGLE_SCRIPT_URL", "").strip()
+        if gs_url:
+            try:
+                requests.post(gs_url, json={
+                    "fullName": full_name,
+                    "email": user_email,
+                    "organization": org,
+                    "role": role,
+                    "tier": data.get("tier", "Tier 3"),
+                    "plan": data.get("plan", "monthly"),
+                    "access_code": access_code
+                }, timeout=6)
+            except Exception as e:
+                print("Warning: Google Script POST failed:", e)
+
+        # Build emails
         internal_msg = Message(
             subject=f"🔥 New Demo Request: {org} - {full_name}",
-            recipients=["info@momentumscout.com"],  # <-- IMPORTANT: where you want it
-            reply_to=user_email,                    # so you can reply directly to the lead
+            recipients=[os.environ.get("INTERNAL_ALERT_EMAIL", "info@momentumscout.com")],
             body=(
-                "New Professional Lead Details:\n"
-                "-----------------------------\n"
-                f"Name: {full_name}\n"
-                f"Email: {user_email}\n"
-                f"Organization: {org}\n"
-                f"Role: {role}\n\n"
-                "Action: Prepare the scouting dashboard environment.\n"
-            ),
+                f"New Professional Lead Details:\n"
+                f"Name: {full_name}\nEmail: {user_email}\nOrganization: {org}\nRole: {role}\nAccess Code: {access_code}\n"
+            )
         )
 
-        # 3) EXTERNAL AUTO-REPLY (send to the lead)
         customer_msg = Message(
             subject="Welcome to MomentumScout – Demo Request Received",
             recipients=[user_email],
-            reply_to="info@momentumscout.com",
             body=(
                 f"Dear {full_name},\n\n"
                 "Thank you for requesting a professional demo of MomentumScout.\n\n"
-                "We’ve received your request and our team will prepare your environment.\n\n"
-                "Best regards,\n"
-                "MomentumScout Team\n"
-                "info@momentumscout.com\n"
-            ),
+                f"Your unique access code is: {access_code}\n\n"
+                "Visit: https://momentumscout.netlify.app and use Member Login → Enter this code to view your dashboard.\n\n"
+                "Best regards,\nMomentumScout Team\n"
+            )
         )
 
-        # 4) Send emails with clear logging
+        # Send mails (best effort)
         try:
-            print("✅ Sending internal email to info@momentumscout.com ...")
             mail.send(internal_msg)
-            print("✅ Internal email sent")
-
-            print("✅ Sending customer confirmation email ...")
             mail.send(customer_msg)
-            print("✅ Customer email sent")
-
         except Exception as e:
-            print("❌ EMAIL SEND FAILED:", repr(e))
-            return jsonify({"success": False, "message": "Email send failed."}), 500
+            print("Email send failed:", repr(e))
+            # still return success because data is saved; but inform you
+            return jsonify({"success": True, "message": "Demo saved but email failed. Check server logs."}), 200
 
         return jsonify({"success": True, "message": "Demo request submitted successfully."}), 200
 
