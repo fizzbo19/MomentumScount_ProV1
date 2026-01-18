@@ -144,49 +144,43 @@
   </head>
 
   <body class="min-h-screen p-6">
+   
     <script>
         (async function verifyDashboardAccess() {
-          // If already logged in, don't prompt again
           const existingEmail = sessionStorage.getItem("momentum_user");
           const existingRole = sessionStorage.getItem("momentum_role");
         
-          if (existingEmail && existingRole === "club") {
-            console.log("✅ Existing session found:", existingEmail);
-            return;
-          }
+          if (existingEmail && existingRole === "club") return;
         
           const email = prompt("Enter your work email:");
-          if (!email) {
-            alert("Email required.");
-            window.location.href = "index.html";
-            return;
-          }
+          if (!email) return (alert("Email required."), (window.location.href = "index.html"));
         
           const code = prompt("Enter your access code:");
-          if (!code) {
-            alert("Access code required.");
-            window.location.href = "index.html";
-            return;
-          }
+          if (!code) return (alert("Access code required."), (window.location.href = "index.html"));
         
           try {
-            const resp = await fetch(
-              "https://momentumai-backend-g1ov.onrender.com/api/verify_login",
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  email: email.trim(),
-                  code: code.trim(),
-                  portal: "club"
-                })
-              }
-            );
+            const resp = await fetch("https://momentumai-backend-g1ov.onrender.com/api/verify_login", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              mode: "cors",
+              // credentials: "include", // only needed if you use cookies
+              body: JSON.stringify({
+                email: email.trim(),
+                code: code.trim(),
+                portal: "club"
+              })
+            });
         
-            const data = await resp.json();
+            // Read raw text first (prevents resp.json() crashing)
+            const raw = await resp.text();
+            let data = {};
+            try { data = raw ? JSON.parse(raw) : {}; } catch (_) {}
+        
+            console.log("VERIFY_LOGIN status:", resp.status);
+            console.log("VERIFY_LOGIN raw response:", raw);
         
             if (!resp.ok || !data.success) {
-              alert(data.message || "Access denied.");
+              alert((data && data.message) ? data.message : `Login failed (HTTP ${resp.status}). Check console.`);
               window.location.href = "index.html";
               return;
             }
@@ -194,16 +188,16 @@
             sessionStorage.setItem("momentum_user", email.trim());
             sessionStorage.setItem("momentum_role", "club");
             sessionStorage.setItem("momentum_entitlements", JSON.stringify(data.entitlements || {}));
-        
             console.log("✅ Access granted:", data.entitlements);
         
           } catch (err) {
-            console.error("Login error:", err);
-            alert("Unable to verify access. Please try again.");
+            console.error("❌ verify_login fetch failed:", err);
+            alert("Network/CORS error. Open DevTools → Console/Network to see details.");
             window.location.href = "index.html";
           }
         })();
         </script>
+        
         
 
     <div id="playerModal" class="modal">
