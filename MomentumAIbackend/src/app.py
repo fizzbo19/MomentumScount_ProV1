@@ -57,17 +57,22 @@ CORS(
 )
 
 
+
 @app.before_request
 def handle_preflight():
     if request.method == "OPTIONS":
         resp = make_response("", 204)
         origin = request.headers.get("Origin")
-        if origin in ALLOWED_ORIGINS:
+
+        if origin and origin in ALLOWED_ORIGINS:
             resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers["Vary"] = "Origin"
             resp.headers["Access-Control-Allow-Credentials"] = "true"
             resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
             resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+
         return resp
+
 
 
 # 🔒 FORCE CORS HEADERS ON *ALL* RESPONSES (incl. errors)
@@ -93,25 +98,29 @@ MAIL_USERNAME = os.environ.get("MAIL_USERNAME")
 MAIL_PASSWORD = os.environ.get("MAIL_PASSWORD")
 
 app.config["MAIL_SERVER"] = os.environ.get("MAIL_SERVER", "smtp.hostinger.com")
-app.config["MAIL_PORT"] = 587
-app.config["MAIL_USE_TLS"] = True
+app.config["MAIL_PORT"] = int(os.environ.get("MAIL_PORT", "587"))
 app.config["MAIL_USE_TLS"] = os.environ.get("MAIL_USE_TLS", "True") == "True"
 app.config["MAIL_USE_SSL"] = os.environ.get("MAIL_USE_SSL", "False") == "True"
 app.config["MAIL_USERNAME"] = MAIL_USERNAME
 app.config["MAIL_PASSWORD"] = MAIL_PASSWORD
 
-# MUST match the authenticated sender when using Gmail SMTP
+# IMPORTANT: this sender email should be the SAME mailbox as MAIL_USERNAME
 app.config["MAIL_DEFAULT_SENDER"] = (
     "MomentumScout Intelligence",
-    os.environ.get("MAIL_USERNAME"),
+    MAIL_USERNAME,
 )
+
 if not MAIL_USERNAME or not MAIL_PASSWORD:
     print("❌ Missing MAIL_USERNAME or MAIL_PASSWORD env vars")
 
 
-
 mail = Mail(app)
 
+@app.route("/api/ping", methods=["GET", "OPTIONS"])
+def api_ping():
+    if request.method == "OPTIONS":
+        return "", 204
+    return jsonify({"ok": True}), 200
 
 
 # ----------------------------------------------------
@@ -270,10 +279,6 @@ def save_signup(data):
         print("Save signup failed:", e)
         return False
 
-
-def check_login_status(email):
-    fp = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_SIGNUPS)
-    if not os.path.exists(fp): return False, "No users found.", {}
 
 def check_login_status(email):
     fp = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_SIGNUPS)
