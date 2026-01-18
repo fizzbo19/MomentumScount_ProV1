@@ -36,17 +36,7 @@
 </head>
 <body class="min-h-screen p-6">
 
-    <script>
-        // Check if user has a valid session from index.html
-        const user = sessionStorage.getItem('momentum_user');
-        const role = sessionStorage.getItem('momentum_role');
-      
-        // If no user found, OR if a Club user tries to access the Baller dashboard -> Kick them out
-        if (!user || role !== 'baller') {
-            alert("Access denied. Please log in via the home page.");
-            window.location.href = "index.html";
-        }
-      </script>
+    
 
 <script>
     (function guard() {
@@ -339,13 +329,18 @@ const BALLER_METRICS = {
         weights: ['tackles', 'interceptions', 'clearances']
     },
     'GK':  { 
-        display: ['saves', 'clean_sheets', 'pass_accuracy'],
-        weights: ['saves', 'clean_sheets']
-    }
+  display: ['total_saves', 'clean_sheets', 'pass_accuracy'],
+  weights: ['total_saves', 'clean_sheets']
+}
+
 };
 
 /* --- Helper Functions --- */
-function fmtScore(score) { return score.toFixed(1) + '%'; }
+function fmtScore(score) { 
+  const n = Number(score || 0);
+  return n.toFixed(1);
+}
+
 function niceName(key){ return key.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); }
 
 function sliderBlock(id, isWeight=false){
@@ -481,7 +476,8 @@ function loadPlayerDetails(player) {
     
     for (const [catName, fields] of Object.entries(categories)) {
         // Only show category if data exists
-        const hasData = fields.some(f => attrs[f] > 0);
+        const hasData = fields.some(f => attrs[f] !== undefined && attrs[f] !== null);
+
         
         if (hasData) {
             statsHtml += `<div class="p-3 bg-gray-900 rounded-lg border border-gray-700">

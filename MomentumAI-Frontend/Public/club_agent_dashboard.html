@@ -155,59 +155,6 @@
         })();
         </script>
         
-    <script>
-        (async function verifyDashboardAccess() {
-          const existingEmail = sessionStorage.getItem("momentum_user");
-          const existingRole = sessionStorage.getItem("momentum_role");
-        
-          if (existingEmail && existingRole === "club") return;
-        
-          const email = prompt("Enter your work email:");
-          if (!email) return (alert("Email required."), (window.location.href = "index.html"));
-        
-          const code = prompt("Enter your access code:");
-          if (!code) return (alert("Access code required."), (window.location.href = "index.html"));
-        
-          try {
-            const resp = await fetch("https://momentumai-backend-g1ov.onrender.com/api/verify_login", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              mode: "cors",
-              // credentials: "include", // only needed if you use cookies
-              body: JSON.stringify({
-                email: email.trim(),
-                code: code.trim(),
-                portal: "club"
-              })
-            });
-        
-            // Read raw text first (prevents resp.json() crashing)
-            const raw = await resp.text();
-            let data = {};
-            try { data = raw ? JSON.parse(raw) : {}; } catch (_) {}
-        
-            console.log("VERIFY_LOGIN status:", resp.status);
-            console.log("VERIFY_LOGIN raw response:", raw);
-        
-            if (!resp.ok || !data.success) {
-              alert((data && data.message) ? data.message : `Login failed (HTTP ${resp.status}). Check console.`);
-              window.location.href = "index.html";
-              return;
-            }
-        
-            sessionStorage.setItem("momentum_user", email.trim());
-            sessionStorage.setItem("momentum_role", "club");
-            sessionStorage.setItem("momentum_entitlements", JSON.stringify(data.entitlements || {}));
-            console.log("✅ Access granted:", data.entitlements);
-        
-          } catch (err) {
-            console.error("❌ verify_login fetch failed:", err);
-            alert("Network/CORS error. Open DevTools → Console/Network to see details.");
-            window.location.href = "index.html";
-          }
-        })();
-        </script>
-        
         
 
     <div id="playerModal" class="modal">
@@ -565,7 +512,8 @@
         weightContainer,
         recommendations,
         loadingIndicator;
-      let playerSearchResults,
+      let playerNameSearch,
+          playerSearchResults,
         searchStatus,
         modal,
         modalInner,
@@ -1060,6 +1008,8 @@ if (!player) return;
 
   playerSearchResults = document.getElementById("playerSearchResults");
   searchStatus = document.getElementById("searchStatus");
+  playerNameSearch = document.getElementById("playerNameSearch");
+
 
   modal = document.getElementById("playerModal");
   modalInner = document.getElementById("modalInner");
