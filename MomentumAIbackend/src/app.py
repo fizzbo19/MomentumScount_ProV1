@@ -19,6 +19,9 @@ import pandas as pd
 import requests
 from flask import Flask, request, jsonify, send_from_directory, make_response
 from flask_mail import Mail, Message
+import threading
+import traceback
+
 
 
 # ----------------------------------------------------
@@ -114,6 +117,24 @@ if not MAIL_USERNAME or not MAIL_PASSWORD:
     print("❌ Missing MAIL_USERNAME or MAIL_PASSWORD env vars", flush=True)
 
 mail = Mail(app)
+
+def _send_emails_bg(app, internal_msg, customer_msg):
+    """Send emails in background so /api/submit_demo never blocks."""
+    with app.app_context():
+        try:
+            mail.send(internal_msg)
+            print("✅ Internal email sent", flush=True)
+        except Exception as e:
+            print("❌ Internal email failed:", repr(e), flush=True)
+            traceback.print_exc()
+
+        try:
+            mail.send(customer_msg)
+            print("✅ Customer email sent", flush=True)
+        except Exception as e:
+            print("❌ Customer email failed:", repr(e), flush=True)
+            traceback.print_exc()
+
 
 
 # ----------------------------------------------------
@@ -652,15 +673,17 @@ def api_submit_demo():
                 "access_code": access_code,
             }
             try:
-                r = requests.post(gs_url, json=payload, timeout=10)
+                r = requests.post(gs_url, json=payload, timeout=4)
                 print("✅ Google Sheet POST status:", r.status_code)
                 print("✅ Google Sheet response:", r.text[:300])
             except Exception as e:
                 print("⚠️ Google Script POST failed:", repr(e))
-
-        # 3) email - STRICT best effort (do NOT block signup)
+                    # 3) EMAIL — send in background so endpoint never hangs
         try:
-            internal_recipient = os.environ.get("INTERNAL_ALERT_EMAIL", "info@momentumscout.com")
+            internal_recipient = os.environ.get(
+                "INTERNAL_ALERT_EMAIL",
+                "info@momentumscout.com"
+            )
 
             internal_msg = Message(
                 subject=f"🔥 New Demo Request: {org} - {full_name}",
@@ -688,19 +711,15 @@ def api_submit_demo():
                 ),
             )
 
-            
-
-            print("✅ Sending internal email...")
-            safe_send_email(internal_msg)
-            print("✅ Internal email sent")
-
-            print("✅ Sending customer email...")
-            safe_send_email(customer_msg)
-            print("✅ Customer email sent")
+            threading.Thread(
+                target=_send_emails_bg,
+                args=(app, internal_msg, customer_msg),
+                daemon=True,
+            ).start()
 
         except Exception as e:
-            # Don't fail signup if email fails/hangs/blocks
-            print("❌ EMAIL SEND FAILED:", repr(e))
+            print("❌ Could not start email thread:", repr(e), flush=True)
+
 
         # Always succeed if saved/sheet worked (email is optional)
         return jsonify({
