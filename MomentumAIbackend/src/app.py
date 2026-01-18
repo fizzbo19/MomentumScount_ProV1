@@ -182,6 +182,19 @@ ENTITLEMENTS_MAP = {
     "Admin": {"analyst_ai": True, "export_csv": True},
 }
 
+# ----------------------------------------------------
+# OWNER / ADMIN OVERRIDE
+# ----------------------------------------------------
+OWNER_EMAILS = {
+    "info@momentumscout.com",
+    "info@fizmaygroup.com",   # add your real owner email(s)
+    "fisayo.s19@gmail.com",   # optional
+}
+
+def is_owner(email: str) -> bool:
+    return (email or "").strip().lower() in OWNER_EMAILS
+
+
 # Global Data Variables
 player_data_base = None
 player_data_baller = None
@@ -579,6 +592,19 @@ def api_verify_login():
     email = (data.get("email") or "").strip().lower()
     code = str(data.get("code") or "").strip()
     portal = (data.get("portal") or "").strip()
+
+        # ✅ OWNER BYPASS: you can access any portal without a code
+    if is_owner(email):
+        return jsonify({
+            "success": True,
+            "message": "Owner access granted",
+            "entitlements": {
+                "tier": "Admin",
+                "plan": "yearly",
+                "analyst_ai": True,
+                "export_csv": True
+            }
+        }), 200
 
     # 1) static portal codes
     if ACCESS_CODES.get(portal) == code:
