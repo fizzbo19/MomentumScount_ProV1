@@ -48,6 +48,17 @@
         }
       </script>
 
+<script>
+    (function guard() {
+      const email = sessionStorage.getItem("momentum_user");
+      const role = sessionStorage.getItem("momentum_role");
+      if (!email || role !== "baller") {
+        window.location.href = "login.html";
+      }
+    })();
+    </script>
+    
+
 <div class="max-w-6xl mx-auto space-y-8">
 
   <header class="text-center relative">

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>MomentumScout — Secure Login</title>
+
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    body {
+      font-family: Inter, sans-serif;
+      background: #0d1117;
+      color: #c9d1d9;
+    }
+  </style>
+</head>
+
+<body class="min-h-screen flex items-center justify-center p-6">
+
+  <div class="w-full max-w-md bg-gray-900 border border-gray-700 rounded-2xl p-6 shadow-xl">
+    <h1 class="text-2xl font-bold text-white">Member Login</h1>
+    <p class="text-sm text-gray-400 mt-1">
+      Enter your email and access code to continue.
+    </p>
+
+    <div class="mt-6 space-y-4">
+
+      <!-- EMAIL -->
+      <div>
+        <label class="block text-sm text-gray-300 mb-1">Email</label>
+        <input
+          id="email"
+          type="email"
+          class="w-full p-3 rounded-lg bg-gray-800 border border-gray-700 text-white focus:ring-2 focus:ring-green-500"
+          placeholder="name@organization.com"
+          autocomplete="email"
+        />
+      </div>
+
+      <!-- ACCESS CODE -->
+      <div>
+        <label class="block text-sm text-gray-300 mb-1">Access Code</label>
+        <input
+          id="code"
+          type="text"
+          class="w-full p-3 rounded-lg bg-gray-800 border border-gray-700 text-white focus:ring-2 focus:ring-green-500"
+          placeholder="Provided access code"
+          autocomplete="one-time-code"
+        />
+      </div>
+
+      <!-- PORTAL -->
+      <div>
+        <label class="block text-sm text-gray-300 mb-1">Portal</label>
+        <select
+          id="portal"
+          class="w-full p-3 rounded-lg bg-gray-800 border border-gray-700 text-white focus:ring-2 focus:ring-green-500"
+        >
+          <option value="club">Club & Agent Dashboard</option>
+          <option value="baller">Baller League Dashboard</option>
+        </select>
+      </div>
+
+      <!-- LOGIN BUTTON -->
+      <button
+        id="loginBtn"
+        class="w-full py-3 rounded-lg bg-green-500 hover:bg-green-600 text-gray-900 font-bold transition"
+      >
+        Login
+      </button>
+
+      <!-- MESSAGE -->
+      <div id="msg" class="hidden text-sm p-3 rounded-lg border"></div>
+
+      <!-- FOOTER -->
+      <div class="text-sm text-gray-400 pt-3 border-t border-gray-800">
+        Need access?
+        <a href="index.html#signup" class="text-green-400 underline">
+          Request a demo
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = "https://momentumai-backend-g1ov.onrender.com/api";
+
+    function showMsg(text, success = false) {
+      const el = document.getElementById("msg");
+      el.classList.remove("hidden");
+      el.textContent = text;
+      el.className =
+        "text-sm p-3 rounded-lg border " +
+        (success
+          ? "border-green-600 bg-green-900/20 text-green-300"
+          : "border-red-600 bg-red-900/20 text-red-300");
+    }
+
+    async function login() {
+      const email = document.getElementById("email").value.trim().toLowerCase();
+      const code = document.getElementById("code").value.trim();
+      const portal = document.getElementById("portal").value;
+
+      if (!email || !code) {
+        showMsg("Please enter both email and access code.");
+        return;
+      }
+
+      const btn = document.getElementById("loginBtn");
+      btn.disabled = true;
+      btn.textContent = "Verifying...";
+
+      try {
+        const resp = await fetch(`${API_BASE}/verify_login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, code, portal })
+        });
+
+        const data = await resp.json();
+
+        if (!resp.ok || !data.success) {
+          showMsg(data.message || "Access denied.");
+          btn.disabled = false;
+          btn.textContent = "Login";
+          return;
+        }
+
+        // Save session
+        sessionStorage.setItem("momentum_user", email);
+        sessionStorage.setItem("momentum_role", portal);
+        sessionStorage.setItem(
+          "momentum_entitlements",
+          JSON.stringify(data.entitlements || {})
+        );
+
+        showMsg("Access granted. Redirecting...", true);
+
+        // Redirect
+        setTimeout(() => {
+          if (portal === "club") {
+            window.location.href = "club_agent_dashboard.html";
+          } else {
+            window.location.href = "dashboard_baller.html";
+          }
+        }, 600);
+
+      } catch (err) {
+        console.error("Login error:", err);
+        showMsg("Network error. Please try again.");
+        btn.disabled = false;
+        btn.textContent = "Login";
+      }
+    }
+
+    document.getElementById("loginBtn").addEventListener("click", login);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") login();
+    });
+  </script>
+</body>
+</html>

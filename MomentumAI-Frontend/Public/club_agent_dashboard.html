@@ -146,6 +146,16 @@
   <body class="min-h-screen p-6">
    
     <script>
+        (function guard() {
+          const email = sessionStorage.getItem("momentum_user");
+          const role = sessionStorage.getItem("momentum_role");
+          if (!email || role !== "club") {
+            window.location.href = "login.html";
+          }
+        })();
+        </script>
+        
+    <script>
         (async function verifyDashboardAccess() {
           const existingEmail = sessionStorage.getItem("momentum_user");
           const existingRole = sessionStorage.getItem("momentum_role");
