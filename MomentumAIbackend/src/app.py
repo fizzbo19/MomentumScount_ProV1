@@ -10,7 +10,6 @@ MomentumScout Backend V1.1 (Robust)
 """
 
 import os
-import math
 import secrets
 from io import StringIO
 from datetime import datetime
@@ -29,10 +28,11 @@ app = Flask(__name__, static_folder="public")
 
 
 # ----------------------------------------------------
-# CORS CONFIG (SINGLE SOURCE OF TRUTH)
+# CORS CONFIG (ROBUST + SAFE)
 # ----------------------------------------------------
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://momentum-ai-io.netlify.app").rstrip("/")
+FRONTEND_URL = (os.environ.get("FRONTEND_URL", "https://momentum-ai-io.netlify.app") or "").rstrip("/")
 
+# Use a set for fast membership checks
 ALLOWED_ORIGINS = {
     FRONTEND_URL,
     "https://momentumscout.netlify.app",
@@ -45,11 +45,29 @@ ALLOWED_ORIGINS = {
     "http://127.0.0.1:5000",
 }
 
-def _add_cors_headers(resp):
+# Clean empty strings if FRONTEND_URL env not set
+ALLOWED_ORIGINS = {o for o in ALLOWED_ORIGINS if o and isinstance(o, str)}
+
+def _cors_origin():
+    """
+    Return the request Origin if it is explicitly allowed.
+    """
     origin = request.headers.get("Origin")
-    if origin in ALLOWED_ORIGINS:
+    if origin and origin in ALLOWED_ORIGINS:
+        return origin
+    return None
+
+def _add_cors_headers(resp):
+    """
+    Always attach CORS headers when Origin is allowed.
+    This runs for normal responses and also error responses.
+    """
+    origin = _cors_origin()
+    if origin:
         resp.headers["Access-Control-Allow-Origin"] = origin
         resp.headers["Vary"] = "Origin"
+        # You are NOT using cookies-based auth, but leaving this true won't break.
+        # If you ever enable credentials, you must NOT use '*' origin.
         resp.headers["Access-Control-Allow-Credentials"] = "true"
         resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
         resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
@@ -57,8 +75,10 @@ def _add_cors_headers(resp):
 
 @app.before_request
 def cors_preflight():
+    # Handle all OPTIONS requests centrally
     if request.method == "OPTIONS":
-        return _add_cors_headers(make_response("", 204))
+        resp = make_response("", 204)
+        return _add_cors_headers(resp)
 
 @app.after_request
 def cors_after(resp):
@@ -73,8 +93,8 @@ MAIL_PASSWORD = os.environ.get("MAIL_PASSWORD")
 
 app.config["MAIL_SERVER"] = os.environ.get("MAIL_SERVER", "smtp.hostinger.com")
 app.config["MAIL_PORT"] = int(os.environ.get("MAIL_PORT", "587"))
-app.config["MAIL_USE_TLS"] = os.environ.get("MAIL_USE_TLS", "True") == "True"
-app.config["MAIL_USE_SSL"] = os.environ.get("MAIL_USE_SSL", "False") == "True"
+app.config["MAIL_USE_TLS"] = (os.environ.get("MAIL_USE_TLS", "True") == "True")
+app.config["MAIL_USE_SSL"] = (os.environ.get("MAIL_USE_SSL", "False") == "True")
 app.config["MAIL_USERNAME"] = MAIL_USERNAME
 app.config["MAIL_PASSWORD"] = MAIL_PASSWORD
 
@@ -85,7 +105,7 @@ app.config["MAIL_DEFAULT_SENDER"] = (
 )
 
 if not MAIL_USERNAME or not MAIL_PASSWORD:
-    print("❌ Missing MAIL_USERNAME or MAIL_PASSWORD env vars")
+    print("❌ Missing MAIL_USERNAME or MAIL_PASSWORD env vars", flush=True)
 
 mail = Mail(app)
 
@@ -95,8 +115,6 @@ mail = Mail(app)
 # ----------------------------------------------------
 @app.route("/api/ping", methods=["GET", "OPTIONS"])
 def api_ping():
-    if request.method == "OPTIONS":
-        return "", 204
     return jsonify({"ok": True}), 200
 
 
@@ -144,7 +162,7 @@ next_match_data = None
 
 
 # ----------------------------------------------------
-# DATABASES (WEIGHTS & DRILLS) - kept from your file
+# DATABASES (WEIGHTS & DRILLS)
 # ----------------------------------------------------
 DRILL_DATABASE = {
     "pace": "Speed ladders and resistance sprint training.",
@@ -247,7 +265,7 @@ def save_signup(data):
             pd.DataFrame([new_row]).to_csv(fp, mode="a", header=False, index=False)
         return True
     except Exception as e:
-        print("Save signup failed:", repr(e))
+        print("Save signup failed:", repr(e), flush=True)
         return False
 
 def check_login_status(email: str):
@@ -313,7 +331,7 @@ def log_analyst_usage(email, player_name):
 
 
 # ----------------------------------------------------
-# AI / DATA HELPERS (kept minimal where needed)
+# AI / DATA HELPERS
 # ----------------------------------------------------
 def generate_training_plan(row, position, is_baller=False):
     plan = {"weakness": "General Conditioning", "drills": ["Standard fitness regime", "Tactical positioning review"]}
@@ -478,7 +496,6 @@ def _load_fc26_data(filename):
 
     df.columns = [clean_column_name(c) for c in df.columns]
 
-    # basic numeric cleaning
     numeric_cols = [col for col in df.columns if df[col].dtype == "object"]
     for col in numeric_cols:
         try:
@@ -526,16 +543,11 @@ def initialize_app():
 # ----------------------------------------------------
 @app.route("/", methods=["GET", "OPTIONS"])
 def health():
-    if request.method == "OPTIONS":
-        return "", 204
     return jsonify({"status": "online"}), 200
 
 
 @app.route("/api/verify_login", methods=["POST", "OPTIONS"])
 def api_verify_login():
-    if request.method == "OPTIONS":
-        return "", 204
-
     data = request.json or {}
     email = (data.get("email") or "").strip().lower()
     code = str(data.get("code") or "").strip()
@@ -590,8 +602,7 @@ def api_verify_login():
 
 @app.route("/api/submit_demo", methods=["POST", "OPTIONS"])
 def api_submit_demo():
-    if request.method == "OPTIONS":
-        return "", 204
+    print("✅ /api/submit_demo HIT", flush=True)
 
     try:
         data = request.json or {}
@@ -610,13 +621,12 @@ def api_submit_demo():
         # save locally to CSV
         saved = save_signup(data)
         if not saved:
-            print("⚠️ Warning: save_signup returned False")
+            print("⚠️ Warning: save_signup returned False", flush=True)
 
         # OPTIONAL: push to Google Sheet (Apps Script)
         gs_url = (os.environ.get("GOOGLE_SCRIPT_URL") or "").strip()
         if gs_url:
-            if not gs_url.startswith("https://script.google.com/"):
-                print("⚠️ GOOGLE_SCRIPT_URL looks wrong:", gs_url)
+            print("✅ Posting to GOOGLE_SCRIPT_URL:", gs_url, flush=True)
 
             payload = {
                 "fullName": full_name,
@@ -630,10 +640,10 @@ def api_submit_demo():
 
             try:
                 r = requests.post(gs_url, json=payload, timeout=10)
-                print("✅ Google Sheet POST status:", r.status_code)
-                print("✅ Google Sheet response:", r.text[:300])
+                print("✅ Google Sheet POST status:", r.status_code, flush=True)
+                print("✅ Google Sheet response:", r.text[:300], flush=True)
             except Exception as e:
-                print("⚠️ Google Script POST failed:", repr(e))
+                print("⚠️ Google Script POST failed:", repr(e), flush=True)
 
         # Build emails
         internal_msg = Message(
@@ -656,7 +666,7 @@ def api_submit_demo():
                 f"Dear {full_name},\n\n"
                 "Thank you for requesting a professional demo of MomentumScout.\n\n"
                 f"Your unique access code is: {access_code}\n\n"
-                "Login here: https://momentum-ai-io.netlify.app/login.html\n\n"
+                "Login here: https://momentumscout.netlify.app/login.html\n\n"
                 "Best regards,\n"
                 "MomentumScout Team\n"
             ),
@@ -666,21 +676,19 @@ def api_submit_demo():
             mail.send(internal_msg)
             mail.send(customer_msg)
         except Exception as e:
-            print("Email send failed:", repr(e))
+            print("Email send failed:", repr(e), flush=True)
             # Still success because data saved
             return jsonify({"success": True, "message": "Demo saved but email failed. Check server logs."}), 200
 
-        return jsonify({"success": True, "message": "Demo request submitted successfully."}), 200
+        return jsonify({"success": True, "message": "Demo request submitted successfully.", "access_code": access_code}), 200
 
     except Exception as e:
-        print("Demo Request Error:", repr(e))
+        print("Demo Request Error:", repr(e), flush=True)
         return jsonify({"success": False, "message": "Submission error. Please try again."}), 500
 
 
 @app.route("/api/find_players", methods=["POST", "OPTIONS"])
 def api_find_players():
-    if request.method == "OPTIONS":
-        return "", 204
     try:
         data = request.json or {}
         df = player_data_baller if data.get("data_source") == "baller" else player_data_base
@@ -697,7 +705,10 @@ def api_find_players():
                 df = df[(df[col] >= float(rng[0])) & (df[col] <= float(rng[1]))]
 
         is_baller = (data.get("data_source") == "baller")
-        df["momentum_score"] = df.apply(lambda r: compute_score_for_player(r, data.get("position", "ALL"), data.get("weights"), is_baller), axis=1)
+        df["momentum_score"] = df.apply(
+            lambda r: compute_score_for_player(r, data.get("position", "ALL"), data.get("weights"), is_baller),
+            axis=1,
+        )
 
         out = []
         for _, row in df.sort_values("momentum_score", ascending=False).head(20).iterrows():
@@ -726,8 +737,6 @@ def api_find_players():
 
 @app.route("/api/search_player", methods=["POST", "OPTIONS"])
 def api_search_player():
-    if request.method == "OPTIONS":
-        return "", 204
     try:
         data = request.json or {}
         query = str(data.get("player_name", "")).lower().strip()
@@ -769,8 +778,6 @@ def api_search_player():
 
 @app.route("/api/budget_target", methods=["POST", "OPTIONS"])
 def api_budget_target():
-    if request.method == "OPTIONS":
-        return "", 204
     try:
         payload = request.json or {}
         max_wage = safe_int(payload.get("max_wage"), 500000)
@@ -804,14 +811,12 @@ def api_budget_target():
         return jsonify({"targets": out}), 200
 
     except Exception as e:
-        print("Budget target error:", repr(e))
+        print("Budget target error:", repr(e), flush=True)
         return jsonify({"targets": [], "error": str(e)}), 500
 
 
 @app.route("/api/next_match", methods=["GET", "OPTIONS"])
 def api_next_match():
-    if request.method == "OPTIONS":
-        return "", 204
     if next_match_data:
         return jsonify({
             "opponent": next_match_data.get("opponent", "Unknown FC"),
@@ -855,8 +860,10 @@ def serve_assets(filename):
 # ----------------------------------------------------
 # STARTUP
 # ----------------------------------------------------
+initialize_app()
+
 if __name__ == "__main__":
-    print("🚀 Initializing backend...")
-    initialize_app()
+    print("🚀 Backend starting...", flush=True)
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
+
