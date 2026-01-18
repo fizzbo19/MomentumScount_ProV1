@@ -98,6 +98,12 @@ app.config["MAIL_USE_SSL"] = (os.environ.get("MAIL_USE_SSL", "False") == "True")
 app.config["MAIL_USERNAME"] = MAIL_USERNAME
 app.config["MAIL_PASSWORD"] = MAIL_PASSWORD
 
+# ✅ IMPORTANT: prevent SMTP hangs (fixes worker timeout / fake CORS errors)
+app.config["MAIL_TIMEOUT"] = int(os.environ.get("MAIL_TIMEOUT", "10"))
+
+
+
+
 # IMPORTANT: sender email should match MAIL_USERNAME mailbox
 app.config["MAIL_DEFAULT_SENDER"] = (
     "MomentumScout Intelligence",
@@ -600,34 +606,42 @@ def api_verify_login():
         return jsonify({"success": False, "message": f"System Error: {str(e)}"}), 500
 
 
+def safe_send_email(msg: Message):
+    try:
+        mail.send(msg)
+        return True
+    except Exception as e:
+        print("❌ EMAIL SEND FAILED:", repr(e), flush=True)
+        return False
+    
 @app.route("/api/submit_demo", methods=["POST", "OPTIONS"])
 def api_submit_demo():
-    print("✅ /api/submit_demo HIT", flush=True)
+    if request.method == "OPTIONS":
+        return ("", 204)
+
 
     try:
         data = request.json or {}
-        full_name = data.get("fullName", "User")
+        full_name = (data.get("fullName") or "User").strip()
         user_email = (data.get("email") or "").strip().lower()
-        org = data.get("organization", "N/A")
-        role = data.get("role", "N/A")
+        org = (data.get("organization") or "N/A").strip()
+        role = (data.get("role") or "N/A").strip()
 
         if not user_email:
             return jsonify({"success": False, "message": "Email required."}), 400
 
-        # generate unique access code and add to data
+        # generate unique access code
         access_code = make_access_code(8)
         data["access_code"] = access_code
 
-        # save locally to CSV
+        # 1) save locally
         saved = save_signup(data)
         if not saved:
-            print("⚠️ Warning: save_signup returned False", flush=True)
+            print("⚠️ Warning: save_signup returned False")
 
-        # OPTIONAL: push to Google Sheet (Apps Script)
+        # 2) push to Google Sheet (Apps Script) - best effort
         gs_url = (os.environ.get("GOOGLE_SCRIPT_URL") or "").strip()
         if gs_url:
-            print("✅ Posting to GOOGLE_SCRIPT_URL:", gs_url, flush=True)
-
             payload = {
                 "fullName": full_name,
                 "email": user_email,
@@ -637,54 +651,69 @@ def api_submit_demo():
                 "plan": data.get("plan", "monthly"),
                 "access_code": access_code,
             }
-
             try:
                 r = requests.post(gs_url, json=payload, timeout=10)
-                print("✅ Google Sheet POST status:", r.status_code, flush=True)
-                print("✅ Google Sheet response:", r.text[:300], flush=True)
+                print("✅ Google Sheet POST status:", r.status_code)
+                print("✅ Google Sheet response:", r.text[:300])
             except Exception as e:
-                print("⚠️ Google Script POST failed:", repr(e), flush=True)
+                print("⚠️ Google Script POST failed:", repr(e))
 
-        # Build emails
-        internal_msg = Message(
-            subject=f"🔥 New Demo Request: {org} - {full_name}",
-            recipients=[os.environ.get("INTERNAL_ALERT_EMAIL", "info@momentumscout.com")],
-            body=(
-                f"New Professional Lead Details:\n"
-                f"Name: {full_name}\n"
-                f"Email: {user_email}\n"
-                f"Organization: {org}\n"
-                f"Role: {role}\n"
-                f"Access Code: {access_code}\n"
-            ),
-        )
-
-        customer_msg = Message(
-            subject="Welcome to MomentumScout – Demo Request Received",
-            recipients=[user_email],
-            body=(
-                f"Dear {full_name},\n\n"
-                "Thank you for requesting a professional demo of MomentumScout.\n\n"
-                f"Your unique access code is: {access_code}\n\n"
-                "Login here: https://momentumscout.netlify.app/login.html\n\n"
-                "Best regards,\n"
-                "MomentumScout Team\n"
-            ),
-        )
-
+        # 3) email - STRICT best effort (do NOT block signup)
         try:
-            mail.send(internal_msg)
-            mail.send(customer_msg)
-        except Exception as e:
-            print("Email send failed:", repr(e), flush=True)
-            # Still success because data saved
-            return jsonify({"success": True, "message": "Demo saved but email failed. Check server logs."}), 200
+            internal_recipient = os.environ.get("INTERNAL_ALERT_EMAIL", "info@momentumscout.com")
 
-        return jsonify({"success": True, "message": "Demo request submitted successfully.", "access_code": access_code}), 200
+            internal_msg = Message(
+                subject=f"🔥 New Demo Request: {org} - {full_name}",
+                recipients=[internal_recipient],
+                body=(
+                    f"New Professional Lead Details:\n"
+                    f"Name: {full_name}\n"
+                    f"Email: {user_email}\n"
+                    f"Organization: {org}\n"
+                    f"Role: {role}\n"
+                    f"Access Code: {access_code}\n"
+                ),
+            )
+
+            customer_msg = Message(
+                subject="Welcome to MomentumScout – Demo Request Received",
+                recipients=[user_email],
+                body=(
+                    f"Dear {full_name},\n\n"
+                    "Thank you for requesting a professional demo of MomentumScout.\n\n"
+                    f"Your unique access code is: {access_code}\n\n"
+                    "Login here: https://momentumscout.netlify.app/login.html\n\n"
+                    "Best regards,\n"
+                    "MomentumScout Team\n"
+                ),
+            )
+
+            
+
+            print("✅ Sending internal email...")
+            safe_send_email(internal_msg)
+            print("✅ Internal email sent")
+
+            print("✅ Sending customer email...")
+            safe_send_email(customer_msg)
+            print("✅ Customer email sent")
+
+        except Exception as e:
+            # Don't fail signup if email fails/hangs/blocks
+            print("❌ EMAIL SEND FAILED:", repr(e))
+
+        # Always succeed if saved/sheet worked (email is optional)
+        return jsonify({
+            "success": True,
+            "message": "Demo request submitted successfully.",
+            "access_code": access_code  # optional: remove if you don't want returning it
+        }), 200
 
     except Exception as e:
-        print("Demo Request Error:", repr(e), flush=True)
+        print("Demo Request Error:", repr(e))
         return jsonify({"success": False, "message": "Submission error. Please try again."}), 500
+
+
 
 
 @app.route("/api/find_players", methods=["POST", "OPTIONS"])
