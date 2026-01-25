@@ -133,17 +133,27 @@ def api_ping():
 # ----------------------------------------------------
 # CONSTANTS / CONFIG
 # ----------------------------------------------------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-if os.path.exists(os.path.join(BASE_DIR, "data")):
-    DEFAULT_DATA_PATH = os.path.join(BASE_DIR, "data")
-elif os.path.exists(os.path.join(BASE_DIR, "../data")):
-    DEFAULT_DATA_PATH = os.path.join(BASE_DIR, "../data")
-else:
-    DEFAULT_DATA_PATH = os.path.join(os.getcwd(), "data")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # MomentumAIbackend/src
 
-DATA_FOLDER_PATH = (os.environ.get("DATA_FOLDER_PATH") or DEFAULT_DATA_PATH).strip()
-if not os.path.exists(DATA_FOLDER_PATH):
-    print(f"⚠️ DATA_FOLDER_PATH does not exist: {DATA_FOLDER_PATH}", flush=True)
+# Default: ../data relative to src/
+DEFAULT_DATA_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "data"))
+
+raw = (os.environ.get("DATA_FOLDER_PATH") or DEFAULT_DATA_PATH).strip()
+
+# Allow relative paths like "data" or "../data"
+if not os.path.isabs(raw):
+    raw = os.path.abspath(os.path.join(BASE_DIR, raw))
+
+DATA_FOLDER_PATH = raw
+
+# Ensure directory exists (required for CSV writes)
+try:
+    os.makedirs(DATA_FOLDER_PATH, exist_ok=True)
+except Exception as e:
+    print(f"❌ Failed to create DATA_FOLDER_PATH={DATA_FOLDER_PATH}: {e}", flush=True)
+
+print("📦 DATA_FOLDER_PATH =", DATA_FOLDER_PATH, flush=True)
+
 
 
 DATA_FILENAME_BASE = os.environ.get("DATA_FILENAME_BASE", "FC26_MomentumScout.csv")
