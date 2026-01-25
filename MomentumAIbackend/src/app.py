@@ -470,6 +470,76 @@ def project_player(row, years=3):
         projections.append({"year": y, "projected_value_eur": int(value), "projected_overall": ovr})
     return projections
 
+def _infer_position_col(df: pd.DataFrame) -> str:
+    for c in ["club_position", "position", "pos", "primary_position"]:
+        if c in df.columns:
+            return c
+    return ""
+
+def _normalize_positions(series: pd.Series) -> pd.Series:
+    def _map_one(x):
+        s = str(x).strip().upper()
+        return POSITION_MAP.get(s, s if s in POSITION_WEIGHTS else "CM")
+    return series.map(_map_one)
+
+def _archetype_from_gaps(position: str, weakest_attrs: list) -> str:
+    # lightweight "AI reasoning" archetype labels
+    w = set(weakest_attrs)
+
+    if position in ["CB"]:
+        if "pace" in w and "defending_standing_tackle" in w:
+            return "Recovery CB (fast, strong in duels)"
+        if "passing" in w or "mentality_vision" in w:
+            return "Ball-Playing CB (progressive passer)"
+        return "Dominant Stopper (duels, positioning)"
+
+    if position in ["LB", "RB"]:
+        if "pace" in w and "power_stamina" in w:
+            return "High-Engine Fullback (overlaps all game)"
+        if "attacking_crossing" in w:
+            return "Creative Fullback (final-third delivery)"
+        return "Defensive Fullback (1v1, positioning)"
+
+    if position in ["CDM"]:
+        if "mentality_interceptions" in w or "defending_standing_tackle" in w:
+            return "Ball-Winning #6 (screen + recoveries)"
+        if "passing" in w:
+            return "Deep-Lying Playmaker (build-up controller)"
+        return "Hybrid #6 (duels + circulation)"
+
+    if position in ["CM"]:
+        if "power_stamina" in w:
+            return "Box-to-Box (engine + pressure resistance)"
+        if "passing" in w or "mentality_vision" in w:
+            return "Tempo Setter (progression + chance creation)"
+        return "All-round CM (balance + retention)"
+
+    if position in ["CAM"]:
+        if "shooting" in w:
+            return "Chance Creator 10 (final pass priority)"
+        if "passing" in w or "mentality_vision" in w:
+            return "Creative 10 (through balls + linking)"
+        return "Attacking 10 (arrivals + box threat)"
+
+    if position in ["LW", "RW"]:
+        if "pace" in w and "dribbling" in w:
+            return "1v1 Winger (isolation + beating man)"
+        if "shooting" in w:
+            return "Inside Forward (goal threat)"
+        return "Wide Creator (crossing + combinations)"
+
+    if position in ["ST", "CF"]:
+        if "attacking_finishing" in w:
+            return "Clinical Finisher (conversion boost)"
+        if "pace" in w:
+            return "Run-in-behind Striker (depth threat)"
+        return "Complete Forward (link + finish)"
+
+    if position == "GK":
+        return "Shot-stopper GK (reflexes + handling)"
+
+    return "Role Upgrade"
+
 
 # ----------------------------------------------------
 # DATA LOADERS
@@ -848,6 +918,140 @@ def api_search_player():
         return jsonify(out), 200
     except Exception:
         return jsonify([]), 500
+
+@app.route("/api/squad_gap_analysis", methods=["POST", "OPTIONS"])
+def api_squad_gap_analysis():
+    try:
+        payload = request.json or {}
+        csv_text = payload.get("csv_text", "")
+        focus_position = str(payload.get("position", "ALL")).upper().strip()
+
+        if not csv_text:
+            return jsonify({"success": False, "message": "Missing csv_text"}), 400
+
+        squad = pd.read_csv(StringIO(csv_text))
+        squad.columns = [clean_column_name(c) for c in squad.columns]
+        squad = squad.fillna(0)
+
+        pos_col = _infer_position_col(squad)
+        if not pos_col:
+            # allow CSVs that are already separated per position (rare) but still handle gracefully
+            squad["club_position"] = "CM"
+            pos_col = "club_position"
+
+        squad[pos_col] = _normalize_positions(squad[pos_col])
+        if pos_col != "club_position":
+            squad["club_position"] = squad[pos_col]
+
+        # positions in uploaded squad
+        squad_positions = sorted(list(set(squad["club_position"].astype(str).tolist())))
+
+        # benchmark from your DB
+        if player_data_base is None or player_data_base.empty:
+            return jsonify({"success": False, "message": "player_data_base not loaded"}), 500
+
+        db = player_data_base.copy()
+        if "club_position" not in db.columns:
+            return jsonify({"success": False, "message": "Database missing club_position"}), 500
+
+        # helper: compute "team score" per position based on POSITION_WEIGHTS
+        def pos_score(df_pos: pd.DataFrame, position: str) -> float:
+            weights = POSITION_WEIGHTS.get(position, {})
+            if not weights or df_pos.empty:
+                return 0.0
+            total_w = sum(weights.values()) or 1
+            score = 0.0
+            for attr, w in weights.items():
+                if attr in df_pos.columns:
+                    score += (df_pos[attr].astype(float).mean() / 100.0) * (w / total_w)
+            return round(score * 100, 2)
+
+        # build analysis blocks
+        positions_to_analyze = squad_positions if focus_position == "ALL" else [focus_position]
+        report_blocks = []
+
+        for pos in positions_to_analyze:
+            squad_pos = squad[squad["club_position"] == pos]
+            if squad_pos.empty:
+                continue
+
+            weights = POSITION_WEIGHTS.get(pos, {})
+            if not weights:
+                continue
+
+            # benchmark: take top quartile mean by score (acts like "elite" baseline)
+            db_pos = db[db["club_position"] == pos].copy()
+            if db_pos.empty:
+                continue
+
+            db_pos["momentum_score"] = db_pos.apply(lambda r: compute_score_for_player(r, pos, None, False), axis=1)
+            elite = db_pos.sort_values("momentum_score", ascending=False).head(max(20, int(len(db_pos) * 0.1)))
+
+            # compute per-attribute gaps
+            gaps = []
+            for attr in weights.keys():
+                if attr in squad_pos.columns and attr in elite.columns:
+                    squad_avg = float(pd.to_numeric(squad_pos[attr], errors="coerce").fillna(0).mean())
+                    elite_avg = float(pd.to_numeric(elite[attr], errors="coerce").fillna(0).mean())
+                    gap = elite_avg - squad_avg
+                    gaps.append((attr, round(squad_avg, 1), round(elite_avg, 1), round(gap, 1)))
+
+            gaps.sort(key=lambda x: x[3], reverse=True)
+            weakest = [g[0] for g in gaps[:3] if g[3] > 0]
+
+            squad_score = pos_score(squad_pos, pos)
+            elite_score = pos_score(elite, pos)
+
+            archetype = _archetype_from_gaps(pos, weakest)
+            why_lines = []
+            for a in weakest:
+                drill = DRILL_DATABASE.get(a, "Targeted technical work + match scenario reps.")
+                why_lines.append(f"- **{a.replace('_',' ').title()}** is below benchmark → {drill}")
+
+            # recommended targets from DB
+            # pick top candidates that beat the squad average on the weakest attributes
+            candidates = db_pos.copy()
+            for a in weakest:
+                if a in candidates.columns:
+                    threshold = float(pd.to_numeric(squad_pos[a], errors="coerce").fillna(0).mean())
+                    candidates = candidates[pd.to_numeric(candidates[a], errors="coerce").fillna(0) >= threshold]
+
+            candidates["momentum_score"] = candidates.apply(lambda r: compute_score_for_player(r, pos, None, False), axis=1)
+            top_targets = candidates.sort_values("momentum_score", ascending=False).head(8)
+
+            targets_out = []
+            for _, r in top_targets.iterrows():
+                rd = r.to_dict()
+                targets_out.append({
+                    "short_name": rd.get("short_name", "Unknown"),
+                    "club_position": rd.get("club_position", pos),
+                    "overall": safe_int(rd.get("overall", 0)),
+                    "value_eur": safe_int(rd.get("value_eur", 0)),
+                    "player_face_url": rd.get("player_face_url", ""),
+                    "full_attributes": {k: (0 if pd.isna(v) else v) for k, v in rd.items()},
+                })
+
+            report_blocks.append({
+                "position": pos,
+                "squad_score": squad_score,
+                "elite_score": elite_score,
+                "archetype": archetype,
+                "gaps": gaps[:6],          # top 6 gaps table
+                "weakest": weakest,        # top 3 gaps
+                "reasoning": why_lines,    # “AI” explanation bullets
+                "targets": targets_out,
+            })
+
+        return jsonify({
+            "success": True,
+            "positions_found": squad_positions,
+            "report": report_blocks,
+        }), 200
+
+    except Exception as e:
+        print("Squad gap analysis error:", repr(e), flush=True)
+        traceback.print_exc()
+        return jsonify({"success": False, "message": str(e)}), 500
 
 
 @app.route("/api/budget_target", methods=["POST", "OPTIONS"])

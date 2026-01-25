@@ -504,6 +504,8 @@
       const DEFAULT_VALUE_MAX = 50000000;
       let currentChart = null;
       let currentTargets = [];
+      let lastSquadTargets = {}; // { "CB": [playerObj, ...], "CM": [...], ... }
+
 
       /* ------------- GLOBAL ELEMENTS ------------- */
       let posSelect,
@@ -568,6 +570,187 @@
         const targetPane = document.getElementById(targetId);
         if (targetPane) targetPane.classList.remove("hidden");
       }
+/* =========================
+   SCOUTING PROFILE ENGINE (MISSING BLOCK)
+   ========================= */
+
+// Position -> which attribute sliders to show + which ones can be weighted
+const POSITION_METRICS = {
+  GK: {
+    display: [
+      "goalkeeping_diving",
+      "goalkeeping_handling",
+      "goalkeeping_kicking",
+      "goalkeeping_positioning",
+      "goalkeeping_reflexes",
+    ],
+    weights: [
+      "goalkeeping_diving",
+      "goalkeeping_handling",
+      "goalkeeping_kicking",
+      "goalkeeping_positioning",
+      "goalkeeping_reflexes",
+    ],
+  },
+  CB: { display: ["pace","passing","defending","power_strength","power_jumping","mentality_interceptions","mentality_positioning","defending_marking_awareness","defending_standing_tackle","defending_sliding_tackle","attacking_crossing"], weights: ["pace","passing","defending"] },
+  LB: { display: ["pace","passing","defending","power_strength","power_jumping","mentality_interceptions","mentality_positioning","defending_marking_awareness","defending_standing_tackle","defending_sliding_tackle","attacking_crossing"], weights: ["pace","passing","defending"] },
+  RB: { display: ["pace","passing","defending","power_strength","power_jumping","mentality_interceptions","mentality_positioning","defending_marking_awareness","defending_standing_tackle","defending_sliding_tackle","attacking_crossing"], weights: ["pace","passing","defending"] },
+  CDM:{ display:["pace","passing","dribbling","defending","physic","mentality_interceptions","mentality_positioning","defending_standing_tackle","defending_sliding_tackle"], weights:["pace","passing","dribbling","defending","physic"] },
+  CM: { display:["pace","passing","dribbling","defending","physic","power_stamina","power_strength","mentality_vision"], weights:["pace","passing","dribbling","defending","physic"] },
+  CAM:{ display:["pace","shooting","passing","dribbling","power_long_shots","mentality_vision","mentality_penalties"], weights:["pace","shooting","passing","dribbling"] },
+  RW: { display:["pace","shooting","passing","dribbling","power_long_shots","skill_curve","skill_fk_accuracy","movement_acceleration","movement_sprint_speed"], weights:["pace","shooting","passing","dribbling"] },
+  LW: { display:["pace","shooting","passing","dribbling","power_long_shots","skill_curve","skill_fk_accuracy","movement_acceleration","movement_sprint_speed"], weights:["pace","shooting","passing","dribbling"] },
+  CF: { display:["pace","shooting","passing","dribbling","power_shot_power","power_jumping","mentality_positioning","mentality_composure"], weights:["pace","shooting","passing","dribbling"] },
+  ST: { display:["pace","shooting","dribbling","power_shot_power","power_jumping","power_strength","mentality_positioning","attacking_finishing"], weights:["pace","shooting","dribbling"] },
+};
+
+// Populate the Target Position dropdown (your HTML select is empty right now)
+function populatePositionOptions() {
+  const options = [
+    ["GK","Goalkeeper"],["RB","Right Back"],["LB","Left Back"],["CB","Centre Back"],
+    ["CDM","Defensive Midfielder"],["CM","Midfielder"],["CAM","Attacking Midfielder"],
+    ["RW","Right Winger"],["LW","Left Winger"],["CF","Centre Forward"],["ST","Striker"],
+  ];
+
+  posSelect.innerHTML = options
+    .map(([v, label]) => `<option value="${v}">${label}</option>`)
+    .join("");
+  posSelect.value = "GK";
+}
+
+// Build the 3 core sliders (Overall/Age/Value) into #coreSliders
+function buildCoreSliders() {
+  coreSliders.innerHTML = `
+    <div class="fade-in">
+      <label class="block text-sm mb-1">Overall: <span id="overallValue" class="text-gray-300">75 - 95</span></label>
+      <input type="range" id="overall_min" min="50" max="99" value="75" class="attribute-slider w-full mb-2">
+      <input type="range" id="overall_max" min="50" max="99" value="95" class="attribute-slider w-full">
+    </div>
+
+    <div class="fade-in">
+      <label class="block text-sm mb-1">Age: <span id="ageValue" class="text-gray-300">20 - 30</span></label>
+      <input type="range" id="age_min" min="16" max="45" value="20" class="attribute-slider w-full mb-2">
+      <input type="range" id="age_max" min="16" max="45" value="30" class="attribute-slider w-full">
+    </div>
+
+    <div class="fade-in">
+      <label class="block text-sm mb-1">Value (M£): <span id="valueValue" class="text-gray-300">1 - 50</span></label>
+      <input type="range" id="value_min" min="0.1" max="999" step="0.1" value="1" class="attribute-slider w-full mb-2">
+      <input type="range" id="value_max" min="0.1" max="999" step="0.1" value="50" class="attribute-slider w-full">
+    </div>
+  `;
+}
+
+// Build dynamic position metrics sliders into #dynamicMetrics
+function buildPositionMetrics(position) {
+  const metrics = POSITION_METRICS[position]?.display || [];
+  dynMetrics.innerHTML = "";
+
+  metrics.forEach((m) => {
+    dynMetrics.innerHTML += `
+      <div class="fade-in">
+        <label class="block text-sm mb-1">
+          ${niceName(m)}: <span id="${m}Value" class="text-gray-300">0 - 99</span>
+        </label>
+        <input id="${m}_min" class="attribute-slider w-full mb-2" type="range" min="0" max="99" value="0">
+        <input id="${m}_max" class="attribute-slider w-full" type="range" min="0" max="99" value="99">
+      </div>
+    `;
+  });
+}
+
+// Build weight sliders into #weightingSliders
+function buildWeightSliders(position) {
+  const weights = POSITION_METRICS[position]?.weights || [];
+
+  // Header
+  let html = `<h4 class="text-sm font-bold text-gray-300 mb-4">Attribute Weighting</h4>`;
+
+  if (position === "GK") {
+    html += `<p class="text-xs text-center text-gray-500">Goalkeeper attributes are not weighted for scouting score.</p>`;
+    weightContainer.innerHTML = html;
+    return;
+  }
+
+  weights.forEach((m) => {
+    const spanId = `weight${m.charAt(0).toUpperCase() + m.slice(1)}Value`;
+    html += `
+      <div class="fade-in">
+        <label class="block text-sm mb-1">
+          ${niceName(m)} Desire: <span id="${spanId}" class="text-gray-300">0</span>
+        </label>
+        <input id="weight_${m}" class="attribute-slider w-full" type="range" min="0" max="100" value="0">
+      </div>
+    `;
+  });
+
+  weightContainer.innerHTML = html;
+}
+
+// Slider listeners + live label updates
+function setupSliderListeners() {
+  const sliders = document.querySelectorAll('input[type="range"]');
+  sliders.forEach((s) => s.addEventListener("input", updateSliderValues));
+  updateSliderValues(); // run once to set correct initial text
+}
+
+function clampMinMax(minEl, maxEl) {
+  if (!minEl || !maxEl) return;
+  if (Number(minEl.value) > Number(maxEl.value)) {
+    // keep them sane by snapping the max to min
+    maxEl.value = minEl.value;
+  }
+}
+
+function updateSliderValues() {
+  // Core ranges
+  const corePairs = [
+    ["overall_min", "overall_max", "overallValue"],
+    ["age_min", "age_max", "ageValue"],
+    ["value_min", "value_max", "valueValue"],
+  ];
+
+  corePairs.forEach(([minId, maxId, spanId]) => {
+    const minEl = document.getElementById(minId);
+    const maxEl = document.getElementById(maxId);
+    const span = document.getElementById(spanId);
+    clampMinMax(minEl, maxEl);
+    if (minEl && maxEl && span) span.textContent = `${minEl.value} - ${maxEl.value}`;
+  });
+
+  // Dynamic metric ranges: *_min -> *_max with span id like paceValue, passingValue, etc
+  document.querySelectorAll('input[id$="_min"]').forEach((minEl) => {
+    const maxEl = document.getElementById(minEl.id.replace("_min", "_max"));
+    const span = document.getElementById(minEl.id.replace("_min", "Value"));
+    // skip core ones (already handled)
+    if (["overall_min","age_min","value_min"].includes(minEl.id)) return;
+
+    clampMinMax(minEl, maxEl);
+    if (span && maxEl) span.textContent = `${minEl.value} - ${maxEl.value}`;
+  });
+
+  // Weight sliders
+  document.querySelectorAll('input[id^="weight_"]').forEach((wEl) => {
+    const metric = wEl.id.replace("weight_", "");
+    const spanId = `weight${metric.charAt(0).toUpperCase() + metric.slice(1)}Value`;
+    const span = document.getElementById(spanId);
+    if (span) span.textContent = wEl.value;
+  });
+}
+
+// Called when position changes
+function updateUIAfterPositionChange() {
+  buildPositionMetrics(posSelect.value);
+  buildWeightSliders(posSelect.value);
+  setupSliderListeners();
+}
+
+// Reset button behavior
+function resetAll() {
+  buildCoreSliders();
+  updateUIAfterPositionChange();
+  recommendations.innerHTML = "";
+}
 
       /* --- SETUP --- */
       function setupEventListeners() {
@@ -598,41 +781,217 @@
   posSelect.onchange = updateUIAfterPositionChange;
 }
 
+let squadCsvText = "";
+
+document.getElementById("squadFileInput").addEventListener("change", (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    squadCsvText = String(reader.result || "");
+    // light UX feedback
+    const box = document.getElementById("gapAnalysisResults");
+    box.innerHTML = `<div class="text-green-400">✅ Squad file loaded. Choose scope and run analysis.</div>`;
+  };
+  reader.readAsText(file);
+});
+
+async function handleSquadAnalysis() {
+  const box = document.getElementById("gapAnalysisResults");
+
+  if (!squadCsvText) {
+    box.innerHTML = `<div class="text-red-400">Please upload a CSV first.</div>`;
+    return;
+  }
+
+  box.innerHTML = `<div class="flex justify-center py-10"><div class="spinner"></div></div>`;
+
+  try {
+    const position = document.getElementById("squadPositionSelect").value || "ALL";
+
+    const data = await safePost("/squad_gap_analysis", {
+      csv_text: squadCsvText,
+      position: position,
+    });
+
+    if (!data?.success) {
+      box.innerHTML = `<div class="text-red-400">Analysis failed: ${data?.message || "Unknown error"}</div>`;
+      return;
+    }
+
+    // populate dropdown from uploaded squad (first time)
+    const sel = document.getElementById("squadPositionSelect");
+    if (sel && sel.options.length <= 1 && Array.isArray(data.positions_found)) {
+      sel.innerHTML =
+        `<option value="ALL">Full Squad Audit</option>` +
+        data.positions_found.map((p) => `<option value="${p}">${p}</option>`).join("");
+    }
+
+    const report = data.report || [];
+    if (!report.length) {
+      box.innerHTML = `<div class="text-yellow-400">No analyzable positions found in the uploaded CSV.</div>`;
+      return;
+    }
+
+    // ✅ IMPORTANT: reset + store targets by position once per block
+    lastSquadTargets = {};
+
+    box.innerHTML = report
+      .map((block) => {
+        // ✅ store targets for click handler
+        lastSquadTargets[block.position] = block.targets || [];
+
+        const gapsHtml = (block.gaps || [])
+          .map(([attr, squadAvg, eliteAvg, gap]) => {
+            return `
+              <div class="flex justify-between text-xs border-b border-gray-800 py-1">
+                <span class="text-gray-300">${niceName(attr)}</span>
+                <span class="text-gray-500">Squad ${squadAvg}</span>
+                <span class="text-gray-500">Elite ${eliteAvg}</span>
+                <span class="${gap > 0 ? "text-red-400" : "text-green-400"}">Δ ${gap}</span>
+              </div>
+            `;
+          })
+          .join("");
+
+        const reasoningHtml = (block.reasoning || [])
+          .map((line) => `<div class="text-xs text-gray-300">${line}</div>`)
+          .join("");
+
+        const targetsHtml = (block.targets || [])
+          .map(
+            (t, idx) => `
+              <div
+                class="squad-target flex items-center justify-between p-2 bg-gray-800 border border-gray-700 rounded cursor-pointer hover:border-green-500"
+                data-pos="${block.position}"
+                data-idx="${idx}"
+              >
+                <div class="flex items-center gap-2">
+                  <img src="${t.player_face_url || ""}" class="w-8 h-8 rounded-full border border-green-500 object-cover" onerror="this.style.display='none'">
+                  <div>
+                    <div class="text-xs font-bold text-green-300">${t.short_name}</div>
+                    <div class="text-[10px] text-gray-500">${t.club_position} • €${Math.round((t.value_eur || 0) / 1e6)}M</div>
+                  </div>
+                </div>
+                <div class="text-sm font-bold text-white">${t.overall || ""}</div>
+              </div>
+            `
+          )
+          .join("");
+
+        // ✅ RETURN THE HTML FOR THIS BLOCK
+        return `
+          <div class="p-4 bg-gray-900 border border-gray-700 rounded-lg">
+            <div class="flex items-center justify-between">
+              <div class="text-sm font-bold text-green-400">${block.position} — Gap Report</div>
+              <div class="text-xs text-gray-400">Squad ${block.squad_score} vs Elite ${block.elite_score}</div>
+            </div>
+
+            <div class="mt-2 text-xs text-yellow-300 font-semibold">
+              Recommended Profile: ${block.archetype}
+            </div>
+
+            <div class="mt-3">
+              <div class="text-xs text-gray-500 mb-1">Biggest Gaps</div>
+              ${gapsHtml}
+            </div>
+
+            <div class="mt-3 ai-suggestion">
+              <div class="text-xs font-bold text-yellow-300 mb-1">AI Reasoning</div>
+              ${reasoningHtml}
+            </div>
+
+            <div class="mt-3">
+              <div class="text-xs text-gray-500 mb-2">Suggested Targets</div>
+              <div class="space-y-2">
+                ${
+                  targetsHtml ||
+                  `<div class="text-xs text-gray-500 italic">No targets found.</div>`
+                }
+              </div>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+  } catch (err) {
+    console.error(err);
+    box.innerHTML = `<div class="text-red-400">Error connecting to server.</div>`;
+  }
+}
+
+
+
+
 
       /* --- DATA HANDLERS --- */
       async function handleFindPlayers() {
-        recommendations.innerHTML = '<div class="spinner mx-auto"></div>';
+  recommendations.innerHTML = '<div class="spinner mx-auto"></div>';
 
-        const body = {
-          position: posSelect.value,
-          filters: {},
-          weights: {},
-          data_source: "base",
-        };
+  const position = posSelect.value;
 
-        body.filters["overall"] = [
-          Number(document.getElementById("Overall_min").value),
-          Number(document.getElementById("Overall_max").value),
-        ];
-        body.filters["age"] = [
-          Number(document.getElementById("Age_min").value),
-          Number(document.getElementById("Age_max").value),
-        ];
-        body.filters["value_eur"] = [
-          Number(document.getElementById("Value_min").value),
-          Number(document.getElementById("Value_max").value),
-        ];
+  // --- Core Filters ---
+  const overallMin = Number(document.getElementById("overall_min").value);
+  const overallMax = Number(document.getElementById("overall_max").value);
+  const ageMin = Number(document.getElementById("age_min").value);
+  const ageMax = Number(document.getElementById("age_max").value);
 
-        safePost("/find_players", body).then((data) => {
-          recommendations.innerHTML = "";
-          if (!data?.players?.length)
-            return (recommendations.innerHTML =
-              '<p class="text-gray-500">No players found.</p>');
-          data.players.forEach((p) =>
-            recommendations.appendChild(renderPlayerCard(p))
-          );
-        });
-      }
+  // Value sliders are in M£ in UI -> convert to EUR (approx)
+  const valueMinMgbp = Number(document.getElementById("value_min").value);
+  const valueMaxMgbp = Number(document.getElementById("value_max").value);
+  const valueMinGbp = valueMinMgbp * 1_000_000;
+  const valueMaxGbp = valueMaxMgbp * 1_000_000;
+  const valueMinEur = Math.round(valueMinGbp / 0.85);
+  const valueMaxEur = Math.round(valueMaxGbp / 0.85);
+
+  const body = {
+    position,
+    filters: {
+      overall: [overallMin, overallMax],
+      age: [ageMin, ageMax],
+      value_eur: [valueMinEur, valueMaxEur],
+    },
+    weights: {},
+    data_source: "base",
+  };
+
+  // --- Dynamic metric filters (pace_min/max etc) ---
+  // We only include metrics that exist for that position
+  const metricList = POSITION_METRICS[position]?.display || [];
+  metricList.forEach((m) => {
+    const minEl = document.getElementById(`${m}_min`);
+    const maxEl = document.getElementById(`${m}_max`);
+    if (minEl && maxEl) {
+      body.filters[m] = [Number(minEl.value), Number(maxEl.value)];
+    }
+  });
+
+  // --- Weight sliders ---
+  const weightList = POSITION_METRICS[position]?.weights || [];
+  weightList.forEach((m) => {
+    const wEl = document.getElementById(`weight_${m}`);
+    if (wEl) body.weights[m] = Number(wEl.value);
+  });
+
+  try {
+    const data = await safePost("/find_players", body);
+    recommendations.innerHTML = "";
+
+    if (!data?.players?.length) {
+      recommendations.innerHTML =
+        '<p class="text-gray-500">No players found.</p>';
+      return;
+    }
+
+    data.players.forEach((p) => recommendations.appendChild(renderPlayerCard(p)));
+  } catch (err) {
+    console.error(err);
+    recommendations.innerHTML =
+      '<p class="text-red-500 text-center">Error connecting to scouting server.</p>';
+  }
+}
+
 
       async function handleSearchPlayers() {
         const q = playerNameSearch.value.trim();
@@ -714,6 +1073,15 @@
         return card;
         }
 
+        function pickStat(attrs, keys, fallback = 50) {
+  for (const k of keys) {
+    const v = attrs?.[k];
+    if (typeof v === "number" && !Number.isNaN(v)) return v;
+  }
+  return fallback;
+}
+
+
       function loadPlayerDetails(player) {
         document.getElementById(
           "analyticsHeader"
@@ -729,13 +1097,14 @@
 
         // Radar Data (Fixed keys for CSV)
         const data = [
-          attrs.pace || 50,
-          attrs.shooting || 50,
-          attrs.passing || 50,
-          attrs.dribbling || 50,
-          attrs.defending || 50,
-          attrs.physic || 50,
-        ];
+  pickStat(attrs, ["pace", "pac"]),
+  pickStat(attrs, ["shooting", "sho"]),
+  pickStat(attrs, ["passing", "pas"]),
+  pickStat(attrs, ["dribbling", "dri"]),
+  pickStat(attrs, ["defending", "defence", "def", "dfs"]),
+  pickStat(attrs, ["physic", "physicality", "physical", "phy"]),
+];
+
 
         if (currentChart) currentChart.destroy();
         const ctx = document.getElementById("performanceChart").getContext("2d");
@@ -915,23 +1284,6 @@ function checkPremiumStatus() {
   }
 }
 
-/* =========================
-   BOOTSTRAP HELPERS (KEEP THIS VERSION)
-   ========================= */
-function attachSliderListeners() {
-  setupSliderListeners();
-}
-
-function updateUIAfterPositionChange() {
-  buildPositionMetrics(posSelect.value);
-  buildWeightSliders(posSelect.value);
-  attachSliderListeners();
-}
-
-function resetAll() {
-  buildCoreSliders();
-  updateUIAfterPositionChange();
-}
 
 /* =========================
    METRIC SLIDER BLOCK (KEEP THIS VERSION)
@@ -1033,12 +1385,31 @@ if (!player) return;
     return;
   }
 
+    // ✅ Squad gap analysis: click a suggested target to open analytics safely
+    const gapBox = document.getElementById("gapAnalysisResults");
+  if (gapBox) {
+    gapBox.addEventListener("click", (e) => {
+      const card = e.target.closest(".squad-target");
+      if (!card) return;
+
+      const pos = card.dataset.pos;
+      const idx = Number(card.dataset.idx);
+      const player = lastSquadTargets?.[pos]?.[idx];
+      if (!player) return;
+
+      loadPlayerDetails(player);
+      switchTab("analytics");
+    });
+  }
+
+
   // --- Build initial UI ---
   try {
+    populatePositionOptions(); 
     buildCoreSliders();                 // must exist earlier in your file
     buildPositionMetrics(posSelect.value);
     buildWeightSliders(posSelect.value);
-    attachSliderListeners();
+    setupSliderListeners();
     setupEventListeners();
     checkPremiumStatus();
   } catch (e) {
