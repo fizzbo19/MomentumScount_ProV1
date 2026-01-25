@@ -1147,23 +1147,31 @@
       }
 
       async function handleSearchPlayers() {
-        const q = playerNameSearch.value.trim();
-        if (!q) return;
+  const q = playerNameSearch.value.trim();
+  if (!q) return;
 
-        playerSearchResults.innerHTML = '<div class="spinner"></div>';
+  playerSearchResults.innerHTML = '<div class="spinner"></div>';
 
-        try {
-          const data = await safePost("/search_player", { player_name: q });
-          playerSearchResults.innerHTML = "";
-          (data || []).forEach((pl) =>
-            playerSearchResults.appendChild(renderPlayerCard(pl))
-          );
-        } catch (err) {
-          console.error(err);
-          playerSearchResults.innerHTML =
-            '<p class="text-red-500 text-center mt-4">Error connecting to scouting server.</p>';
-        }
-      }
+  try {
+    const data = await safePost("/search_player", { player_name: q });
+    playerSearchResults.innerHTML = "";
+
+    if (!data || data.length === 0) {
+      playerSearchResults.innerHTML =
+        '<p class="text-gray-500 text-center mt-4">No matches found (or database not loaded on server).</p>';
+      return;
+    }
+
+    data.forEach((pl) =>
+      playerSearchResults.appendChild(renderPlayerCard(pl))
+    );
+  } catch (err) {
+    console.error(err);
+    playerSearchResults.innerHTML =
+      '<p class="text-red-500 text-center mt-4">Error connecting to scouting server.</p>';
+  }
+}
+
 
       async function handleBudgetTargeting() {
         const list = document.getElementById("targetResults");

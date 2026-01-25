@@ -640,6 +640,30 @@ def api_debug():
         "file_exists": os.path.exists(os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_BASE)),
     }), 200
 
+@app.route("/api/sample_player", methods=["GET"])
+def api_sample_player():
+    if player_data_base is None or player_data_base.empty:
+        return jsonify({
+            "ok": False,
+            "reason": "player_data_base is empty",
+            "data_folder_path": DATA_FOLDER_PATH,
+            "resolved_path": os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_BASE),
+            "file_exists": os.path.exists(os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_BASE)),
+        }), 200
+
+    row = player_data_base.iloc[0].to_dict()
+    # keep it light
+    return jsonify({
+        "ok": True,
+        "rows": int(len(player_data_base)),
+        "sample": {
+            "short_name": row.get("short_name"),
+            "club_position": row.get("club_position"),
+            "overall": row.get("overall"),
+            "value_eur": row.get("value_eur"),
+        }
+    }), 200
+
 
 @app.route("/api/verify_login", methods=["POST", "OPTIONS"])
 def api_verify_login():
