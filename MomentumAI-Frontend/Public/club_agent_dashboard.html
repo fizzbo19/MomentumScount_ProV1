@@ -144,18 +144,21 @@
   </head>
 
   <body class="min-h-screen p-6">
-   
+    <!-- ✅ Guard: allow localhost dev (from Version 2) -->
     <script>
-        (function guard() {
-          const email = sessionStorage.getItem("momentum_user");
-          const role = sessionStorage.getItem("momentum_role");
-          if (!email || role !== "club") {
+      (function guard() {
+        const email = sessionStorage.getItem("momentum_user");
+        const role = sessionStorage.getItem("momentum_role");
+        if (!email || role !== "club") {
+          if (
+            window.location.hostname !== "localhost" &&
+            window.location.hostname !== "127.0.0.1"
+          ) {
             window.location.href = "login.html";
           }
-        })();
-        </script>
-        
-        
+        }
+      })();
+    </script>
 
     <div id="playerModal" class="modal">
       <div
@@ -504,8 +507,7 @@
       const DEFAULT_VALUE_MAX = 50000000;
       let currentChart = null;
       let currentTargets = [];
-      let lastSquadTargets = {}; // { "CB": [playerObj, ...], "CM": [...], ... }
-
+      let lastSquadTargets = {}; // { "CB": [playerObj, ...], ... }
 
       /* ------------- GLOBAL ELEMENTS ------------- */
       let posSelect,
@@ -514,24 +516,29 @@
         weightContainer,
         recommendations,
         loadingIndicator;
+
       let playerNameSearch,
-          playerSearchResults,
+        playerSearchResults,
         searchStatus,
         modal,
         modalInner,
         closeModal;
+
       let findBtn,
         resetBtn,
         searchBtn,
         analyzeSquadBtn,
         targetPlayersBtn,
         squadPositionSelect;
+
       let detailedStatsTable, trainingRegime;
 
       /* --- HELPER FUNCTIONS --- */
       function niceName(key) {
+        if (!key) return "";
         return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
       }
+
       function fmtGBPFromEur(eur) {
         if (!eur) return "£0.0M";
         const gbp = eur * 0.85;
@@ -570,513 +577,671 @@
         const targetPane = document.getElementById(targetId);
         if (targetPane) targetPane.classList.remove("hidden");
       }
-/* =========================
-   SCOUTING PROFILE ENGINE (MISSING BLOCK)
-   ========================= */
 
-// Position -> which attribute sliders to show + which ones can be weighted
-const POSITION_METRICS = {
-  GK: {
-    display: [
-      "goalkeeping_diving",
-      "goalkeeping_handling",
-      "goalkeeping_kicking",
-      "goalkeeping_positioning",
-      "goalkeeping_reflexes",
-    ],
-    weights: [
-      "goalkeeping_diving",
-      "goalkeeping_handling",
-      "goalkeeping_kicking",
-      "goalkeeping_positioning",
-      "goalkeeping_reflexes",
-    ],
-  },
-  CB: { display: ["pace","passing","defending","power_strength","power_jumping","mentality_interceptions","mentality_positioning","defending_marking_awareness","defending_standing_tackle","defending_sliding_tackle","attacking_crossing"], weights: ["pace","passing","defending"] },
-  LB: { display: ["pace","passing","defending","power_strength","power_jumping","mentality_interceptions","mentality_positioning","defending_marking_awareness","defending_standing_tackle","defending_sliding_tackle","attacking_crossing"], weights: ["pace","passing","defending"] },
-  RB: { display: ["pace","passing","defending","power_strength","power_jumping","mentality_interceptions","mentality_positioning","defending_marking_awareness","defending_standing_tackle","defending_sliding_tackle","attacking_crossing"], weights: ["pace","passing","defending"] },
-  CDM:{ display:["pace","passing","dribbling","defending","physic","mentality_interceptions","mentality_positioning","defending_standing_tackle","defending_sliding_tackle"], weights:["pace","passing","dribbling","defending","physic"] },
-  CM: { display:["pace","passing","dribbling","defending","physic","power_stamina","power_strength","mentality_vision"], weights:["pace","passing","dribbling","defending","physic"] },
-  CAM:{ display:["pace","shooting","passing","dribbling","power_long_shots","mentality_vision","mentality_penalties"], weights:["pace","shooting","passing","dribbling"] },
-  RW: { display:["pace","shooting","passing","dribbling","power_long_shots","skill_curve","skill_fk_accuracy","movement_acceleration","movement_sprint_speed"], weights:["pace","shooting","passing","dribbling"] },
-  LW: { display:["pace","shooting","passing","dribbling","power_long_shots","skill_curve","skill_fk_accuracy","movement_acceleration","movement_sprint_speed"], weights:["pace","shooting","passing","dribbling"] },
-  CF: { display:["pace","shooting","passing","dribbling","power_shot_power","power_jumping","mentality_positioning","mentality_composure"], weights:["pace","shooting","passing","dribbling"] },
-  ST: { display:["pace","shooting","dribbling","power_shot_power","power_jumping","power_strength","mentality_positioning","attacking_finishing"], weights:["pace","shooting","dribbling"] },
-};
+      /* =========================
+         SCOUTING PROFILE ENGINE
+         (✅ FIXED: Version 1 had a syntax error here)
+         ========================= */
 
-// Populate the Target Position dropdown (your HTML select is empty right now)
-function populatePositionOptions() {
-  const options = [
-    ["GK","Goalkeeper"],["RB","Right Back"],["LB","Left Back"],["CB","Centre Back"],
-    ["CDM","Defensive Midfielder"],["CM","Midfielder"],["CAM","Attacking Midfielder"],
-    ["RW","Right Winger"],["LW","Left Winger"],["CF","Centre Forward"],["ST","Striker"],
-  ];
+      const POSITION_METRICS = {
+        GK: {
+          display: [
+            "goalkeeping_diving",
+            "goalkeeping_handling",
+            "goalkeeping_kicking",
+            "goalkeeping_positioning",
+            "goalkeeping_reflexes",
+          ],
+          weights: [
+            "goalkeeping_diving",
+            "goalkeeping_handling",
+            "goalkeeping_kicking",
+            "goalkeeping_positioning",
+            "goalkeeping_reflexes",
+          ],
+        },
+        CB: {
+          display: [
+            "pace",
+            "passing",
+            "defending",
+            "power_strength",
+            "power_jumping",
+            "mentality_interceptions",
+            "mentality_positioning",
+            "defending_marking_awareness",
+            "defending_standing_tackle",
+            "defending_sliding_tackle",
+            "attacking_crossing",
+          ],
+          weights: ["pace", "passing", "defending"],
+        },
+        LB: {
+          display: [
+            "pace",
+            "passing",
+            "defending",
+            "power_strength",
+            "power_jumping",
+            "mentality_interceptions",
+            "mentality_positioning",
+            "defending_marking_awareness",
+            "defending_standing_tackle",
+            "defending_sliding_tackle",
+            "attacking_crossing",
+          ],
+          weights: ["pace", "passing", "defending"],
+        },
+        RB: {
+          display: [
+            "pace",
+            "passing",
+            "defending",
+            "power_strength",
+            "power_jumping",
+            "mentality_interceptions",
+            "mentality_positioning",
+            "defending_marking_awareness",
+            "defending_standing_tackle",
+            "defending_sliding_tackle",
+            "attacking_crossing",
+          ],
+          weights: ["pace", "passing", "defending"],
+        },
+        CDM: {
+          display: [
+            "pace",
+            "passing",
+            "dribbling",
+            "defending",
+            "physic",
+            "mentality_interceptions",
+            "mentality_positioning",
+            "defending_standing_tackle",
+            "defending_sliding_tackle",
+          ],
+          weights: ["pace", "passing", "dribbling", "defending", "physic"],
+        },
+        CM: {
+          display: [
+            "pace",
+            "passing",
+            "dribbling",
+            "defending",
+            "physic",
+            "power_stamina",
+            "power_strength",
+            "mentality_vision",
+          ],
+          weights: ["pace", "passing", "dribbling", "defending", "physic"],
+        },
+        CAM: {
+          display: [
+            "pace",
+            "shooting",
+            "passing",
+            "dribbling",
+            "power_long_shots",
+            "mentality_vision",
+            "mentality_penalties",
+          ],
+          weights: ["pace", "shooting", "passing", "dribbling"],
+        },
+        RW: {
+          display: [
+            "pace",
+            "shooting",
+            "passing",
+            "dribbling",
+            "power_long_shots",
+            "skill_curve",
+            "skill_fk_accuracy",
+            "movement_acceleration",
+            "movement_sprint_speed",
+          ],
+          weights: ["pace", "shooting", "passing", "dribbling"],
+        },
+        LW: {
+          display: [
+            "pace",
+            "shooting",
+            "passing",
+            "dribbling",
+            "power_long_shots",
+            "skill_curve",
+            "skill_fk_accuracy",
+            "movement_acceleration",
+            "movement_sprint_speed",
+          ],
+          weights: ["pace", "shooting", "passing", "dribbling"],
+        },
+        CF: {
+          display: [
+            "pace",
+            "shooting",
+            "passing",
+            "dribbling",
+            "power_shot_power",
+            "power_jumping",
+            "mentality_positioning",
+            "mentality_composure",
+          ],
+          weights: ["pace", "shooting", "passing", "dribbling"],
+        },
+        ST: {
+          display: [
+            "pace",
+            "shooting",
+            "dribbling",
+            "power_shot_power",
+            "power_jumping",
+            "power_strength",
+            "mentality_positioning",
+            "attacking_finishing",
+          ],
+          weights: ["pace", "shooting", "dribbling"],
+        },
+      };
 
-  posSelect.innerHTML = options
-    .map(([v, label]) => `<option value="${v}">${label}</option>`)
-    .join("");
-  posSelect.value = "GK";
-}
+      // Populate the Target Position dropdown
+      function populatePositionOptions() {
+        const options = [
+          ["GK", "Goalkeeper"],
+          ["RB", "Right Back"],
+          ["LB", "Left Back"],
+          ["CB", "Centre Back"],
+          ["CDM", "Defensive Midfielder"],
+          ["CM", "Midfielder"],
+          ["CAM", "Attacking Midfielder"],
+          ["RW", "Right Winger"],
+          ["LW", "Left Winger"],
+          ["CF", "Centre Forward"],
+          ["ST", "Striker"],
+        ];
 
-// Build the 3 core sliders (Overall/Age/Value) into #coreSliders
-function buildCoreSliders() {
-  coreSliders.innerHTML = `
-    <div class="fade-in">
-      <label class="block text-sm mb-1">Overall: <span id="overallValue" class="text-gray-300">75 - 95</span></label>
-      <input type="range" id="overall_min" min="50" max="99" value="75" class="attribute-slider w-full mb-2">
-      <input type="range" id="overall_max" min="50" max="99" value="95" class="attribute-slider w-full">
-    </div>
+        posSelect.innerHTML = options
+          .map(([v, label]) => `<option value="${v}">${label}</option>`)
+          .join("");
+        posSelect.value = "GK";
+      }
 
-    <div class="fade-in">
-      <label class="block text-sm mb-1">Age: <span id="ageValue" class="text-gray-300">20 - 30</span></label>
-      <input type="range" id="age_min" min="16" max="45" value="20" class="attribute-slider w-full mb-2">
-      <input type="range" id="age_max" min="16" max="45" value="30" class="attribute-slider w-full">
-    </div>
+      // Build the 3 core sliders
+      function buildCoreSliders() {
+        coreSliders.innerHTML = `
+          <div class="fade-in">
+            <label class="block text-sm mb-1">Overall: <span id="overallValue" class="text-gray-300">75 - 95</span></label>
+            <input type="range" id="overall_min" min="50" max="99" value="75" class="attribute-slider w-full mb-2">
+            <input type="range" id="overall_max" min="50" max="99" value="95" class="attribute-slider w-full">
+          </div>
 
-    <div class="fade-in">
-      <label class="block text-sm mb-1">Value (M£): <span id="valueValue" class="text-gray-300">1 - 50</span></label>
-      <input type="range" id="value_min" min="0.1" max="999" step="0.1" value="1" class="attribute-slider w-full mb-2">
-      <input type="range" id="value_max" min="0.1" max="999" step="0.1" value="50" class="attribute-slider w-full">
-    </div>
-  `;
-}
+          <div class="fade-in">
+            <label class="block text-sm mb-1">Age: <span id="ageValue" class="text-gray-300">20 - 30</span></label>
+            <input type="range" id="age_min" min="16" max="45" value="20" class="attribute-slider w-full mb-2">
+            <input type="range" id="age_max" min="16" max="45" value="30" class="attribute-slider w-full">
+          </div>
 
-// Build dynamic position metrics sliders into #dynamicMetrics
-function buildPositionMetrics(position) {
-  const metrics = POSITION_METRICS[position]?.display || [];
-  dynMetrics.innerHTML = "";
+          <div class="fade-in">
+            <label class="block text-sm mb-1">Value (M£): <span id="valueValue" class="text-gray-300">1 - 50</span></label>
+            <input type="range" id="value_min" min="0.1" max="999" step="0.1" value="1" class="attribute-slider w-full mb-2">
+            <input type="range" id="value_max" min="0.1" max="999" step="0.1" value="50" class="attribute-slider w-full">
+          </div>
+        `;
+      }
 
-  metrics.forEach((m) => {
-    dynMetrics.innerHTML += `
-      <div class="fade-in">
-        <label class="block text-sm mb-1">
-          ${niceName(m)}: <span id="${m}Value" class="text-gray-300">0 - 99</span>
-        </label>
-        <input id="${m}_min" class="attribute-slider w-full mb-2" type="range" min="0" max="99" value="0">
-        <input id="${m}_max" class="attribute-slider w-full" type="range" min="0" max="99" value="99">
-      </div>
-    `;
-  });
-}
+      // Build dynamic position metrics sliders
+      function buildPositionMetrics(position) {
+        const metrics = POSITION_METRICS[position]?.display || [];
+        dynMetrics.innerHTML = "";
 
-// Build weight sliders into #weightingSliders
-function buildWeightSliders(position) {
-  const weights = POSITION_METRICS[position]?.weights || [];
+        metrics.forEach((m) => {
+          dynMetrics.innerHTML += `
+            <div class="fade-in">
+              <label class="block text-sm mb-1">
+                ${niceName(m)}: <span id="${m}Value" class="text-gray-300">0 - 99</span>
+              </label>
+              <input id="${m}_min" class="attribute-slider w-full mb-2" type="range" min="0" max="99" value="0">
+              <input id="${m}_max" class="attribute-slider w-full" type="range" min="0" max="99" value="99">
+            </div>
+          `;
+        });
+      }
 
-  // Header
-  let html = `<h4 class="text-sm font-bold text-gray-300 mb-4">Attribute Weighting</h4>`;
+      // Build weight sliders
+      function buildWeightSliders(position) {
+        const weights = POSITION_METRICS[position]?.weights || [];
 
-  if (position === "GK") {
-    html += `<p class="text-xs text-center text-gray-500">Goalkeeper attributes are not weighted for scouting score.</p>`;
-    weightContainer.innerHTML = html;
-    return;
-  }
+        let html = `<h4 class="text-sm font-bold text-gray-300 mb-4">Attribute Weighting</h4>`;
 
-  weights.forEach((m) => {
-    const spanId = `weight${m.charAt(0).toUpperCase() + m.slice(1)}Value`;
-    html += `
-      <div class="fade-in">
-        <label class="block text-sm mb-1">
-          ${niceName(m)} Desire: <span id="${spanId}" class="text-gray-300">0</span>
-        </label>
-        <input id="weight_${m}" class="attribute-slider w-full" type="range" min="0" max="100" value="0">
-      </div>
-    `;
-  });
+        if (position === "GK") {
+          html += `<p class="text-xs text-center text-gray-500">Goalkeeper attributes are not weighted for scouting score.</p>`;
+          weightContainer.innerHTML = html;
+          return;
+        }
 
-  weightContainer.innerHTML = html;
-}
+        weights.forEach((m) => {
+          const spanId = `weight${m.charAt(0).toUpperCase() + m.slice(1)}Value`;
+          html += `
+            <div class="fade-in">
+              <label class="block text-sm mb-1">
+                ${niceName(m)} Desire: <span id="${spanId}" class="text-gray-300">0</span>
+              </label>
+              <input id="weight_${m}" class="attribute-slider w-full" type="range" min="0" max="100" value="0">
+            </div>
+          `;
+        });
 
-// Slider listeners + live label updates
-function setupSliderListeners() {
-  const sliders = document.querySelectorAll('input[type="range"]');
-  sliders.forEach((s) => s.addEventListener("input", updateSliderValues));
-  updateSliderValues(); // run once to set correct initial text
-}
+        weightContainer.innerHTML = html;
+      }
 
-function clampMinMax(minEl, maxEl) {
-  if (!minEl || !maxEl) return;
-  if (Number(minEl.value) > Number(maxEl.value)) {
-    // keep them sane by snapping the max to min
-    maxEl.value = minEl.value;
-  }
-}
+      // Slider listeners + live label updates
+      function setupSliderListeners() {
+        const sliders = document.querySelectorAll('input[type="range"]');
+        sliders.forEach((s) => s.addEventListener("input", updateSliderValues));
+        updateSliderValues();
+      }
 
-function updateSliderValues() {
-  // Core ranges
-  const corePairs = [
-    ["overall_min", "overall_max", "overallValue"],
-    ["age_min", "age_max", "ageValue"],
-    ["value_min", "value_max", "valueValue"],
-  ];
+      function clampMinMax(minEl, maxEl) {
+        if (!minEl || !maxEl) return;
+        if (Number(minEl.value) > Number(maxEl.value)) {
+          maxEl.value = minEl.value;
+        }
+      }
 
-  corePairs.forEach(([minId, maxId, spanId]) => {
-    const minEl = document.getElementById(minId);
-    const maxEl = document.getElementById(maxId);
-    const span = document.getElementById(spanId);
-    clampMinMax(minEl, maxEl);
-    if (minEl && maxEl && span) span.textContent = `${minEl.value} - ${maxEl.value}`;
-  });
+      function updateSliderValues() {
+        const corePairs = [
+          ["overall_min", "overall_max", "overallValue"],
+          ["age_min", "age_max", "ageValue"],
+          ["value_min", "value_max", "valueValue"],
+        ];
 
-  // Dynamic metric ranges: *_min -> *_max with span id like paceValue, passingValue, etc
-  document.querySelectorAll('input[id$="_min"]').forEach((minEl) => {
-    const maxEl = document.getElementById(minEl.id.replace("_min", "_max"));
-    const span = document.getElementById(minEl.id.replace("_min", "Value"));
-    // skip core ones (already handled)
-    if (["overall_min","age_min","value_min"].includes(minEl.id)) return;
+        corePairs.forEach(([minId, maxId, spanId]) => {
+          const minEl = document.getElementById(minId);
+          const maxEl = document.getElementById(maxId);
+          const span = document.getElementById(spanId);
+          clampMinMax(minEl, maxEl);
+          if (minEl && maxEl && span)
+            span.textContent = `${minEl.value} - ${maxEl.value}`;
+        });
 
-    clampMinMax(minEl, maxEl);
-    if (span && maxEl) span.textContent = `${minEl.value} - ${maxEl.value}`;
-  });
+        document.querySelectorAll('input[id$="_min"]').forEach((minEl) => {
+          const maxEl = document.getElementById(
+            minEl.id.replace("_min", "_max")
+          );
+          const span = document.getElementById(
+            minEl.id.replace("_min", "Value")
+          );
 
-  // Weight sliders
-  document.querySelectorAll('input[id^="weight_"]').forEach((wEl) => {
-    const metric = wEl.id.replace("weight_", "");
-    const spanId = `weight${metric.charAt(0).toUpperCase() + metric.slice(1)}Value`;
-    const span = document.getElementById(spanId);
-    if (span) span.textContent = wEl.value;
-  });
-}
+          if (["overall_min", "age_min", "value_min"].includes(minEl.id))
+            return;
 
-// Called when position changes
-function updateUIAfterPositionChange() {
-  buildPositionMetrics(posSelect.value);
-  buildWeightSliders(posSelect.value);
-  setupSliderListeners();
-}
+          clampMinMax(minEl, maxEl);
+          if (span && maxEl) span.textContent = `${minEl.value} - ${maxEl.value}`;
+        });
 
-// Reset button behavior
-function resetAll() {
-  buildCoreSliders();
-  updateUIAfterPositionChange();
-  recommendations.innerHTML = "";
-}
+        document.querySelectorAll('input[id^="weight_"]').forEach((wEl) => {
+          const metric = wEl.id.replace("weight_", "");
+          const spanId = `weight${metric.charAt(0).toUpperCase() + metric.slice(1)}Value`;
+          const span = document.getElementById(spanId);
+          if (span) span.textContent = wEl.value;
+        });
+      }
+
+      function updateUIAfterPositionChange() {
+        buildPositionMetrics(posSelect.value);
+        buildWeightSliders(posSelect.value);
+        setupSliderListeners();
+      }
+
+      function resetAll() {
+        buildCoreSliders();
+        updateUIAfterPositionChange();
+        recommendations.innerHTML = "";
+      }
 
       /* --- SETUP --- */
       function setupEventListeners() {
-  closeModal.onclick = () => (modal.style.display = "none");
+        closeModal.onclick = () => (modal.style.display = "none");
 
-  window.onclick = (e) => {
-    if (e.target === modal) modal.style.display = "none";
-  };
+        window.onclick = (e) => {
+          if (e.target === modal) modal.style.display = "none";
+        };
 
-  document.getElementById("backToScouting").onclick = () => switchTab("scouting");
+        document.getElementById("backToScouting").onclick = () =>
+          switchTab("scouting");
 
-  document
-    .querySelectorAll(".tab-button")
-    .forEach((tab) => (tab.onclick = () => switchTab(tab.dataset.tab)));
+        document
+          .querySelectorAll(".tab-button")
+          .forEach((tab) => (tab.onclick = () => switchTab(tab.dataset.tab)));
 
-  findBtn.onclick = handleFindPlayers;
-  searchBtn.onclick = handleSearchPlayers;
-  resetBtn.onclick = resetAll;
-  analyzeSquadBtn.onclick = handleSquadAnalysis;
-  targetPlayersBtn.onclick = handleBudgetTargeting;
+        findBtn.onclick = handleFindPlayers;
+        searchBtn.onclick = handleSearchPlayers;
+        resetBtn.onclick = resetAll;
+        analyzeSquadBtn.onclick = handleSquadAnalysis;
+        targetPlayersBtn.onclick = handleBudgetTargeting;
 
-  document.getElementById("exportTargetsBtn").onclick = handleExportCSV;
-  document.getElementById("saveTargetsBtn").onclick = handleSaveToProfile;
-  document.getElementById("loadTargetsBtn").onclick = handleLoadSavedTargets;
-  document.getElementById("clearShortlistBtn").onclick = handleClearShortlist;
-  document.getElementById("exportPdfBtn").onclick = handleExportPDF;
+        document.getElementById("exportTargetsBtn").onclick = handleExportCSV;
+        document.getElementById("saveTargetsBtn").onclick = handleSaveToProfile;
+        document.getElementById("loadTargetsBtn").onclick =
+          handleLoadSavedTargets;
+        document.getElementById("clearShortlistBtn").onclick =
+          handleClearShortlist;
+        document.getElementById("exportPdfBtn").onclick = handleExportPDF;
 
-  posSelect.onchange = updateUIAfterPositionChange;
-}
+        posSelect.onchange = updateUIAfterPositionChange;
+      }
 
-let squadCsvText = "";
+      /* --- SQUAD CSV UPLOAD --- */
+      let squadCsvText = "";
 
-document.getElementById("squadFileInput").addEventListener("change", (e) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
+      document
+        .getElementById("squadFileInput")
+        .addEventListener("change", (e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
 
-  const reader = new FileReader();
-  reader.onload = () => {
-    squadCsvText = String(reader.result || "");
-    // light UX feedback
-    const box = document.getElementById("gapAnalysisResults");
-    box.innerHTML = `<div class="text-green-400">✅ Squad file loaded. Choose scope and run analysis.</div>`;
-  };
-  reader.readAsText(file);
-});
+          const reader = new FileReader();
+          reader.onload = () => {
+            squadCsvText = String(reader.result || "");
+            const box = document.getElementById("gapAnalysisResults");
+            box.innerHTML = `<div class="text-green-400">✅ Squad file loaded. Choose scope and run analysis.</div>`;
+          };
+          reader.readAsText(file);
+        });
 
-async function handleSquadAnalysis() {
-  const box = document.getElementById("gapAnalysisResults");
+      async function handleSquadAnalysis() {
+        const box = document.getElementById("gapAnalysisResults");
 
-  if (!squadCsvText) {
-    box.innerHTML = `<div class="text-red-400">Please upload a CSV first.</div>`;
-    return;
-  }
+        if (!squadCsvText) {
+          box.innerHTML = `<div class="text-red-400">Please upload a CSV first.</div>`;
+          return;
+        }
 
-  box.innerHTML = `<div class="flex justify-center py-10"><div class="spinner"></div></div>`;
+        box.innerHTML = `<div class="flex justify-center py-10"><div class="spinner"></div></div>`;
 
-  try {
-    const position = document.getElementById("squadPositionSelect").value || "ALL";
+        try {
+          const position =
+            document.getElementById("squadPositionSelect").value || "ALL";
 
-    const data = await safePost("/squad_gap_analysis", {
-      csv_text: squadCsvText,
-      position,
-    });
+          const data = await safePost("/squad_gap_analysis", {
+            csv_text: squadCsvText,
+            position,
+          });
 
-    if (!data?.success) {
-      box.innerHTML = `<div class="text-red-400">Analysis failed: ${data?.message || "Unknown error"}</div>`;
-      return;
-    }
+          if (!data?.success) {
+            box.innerHTML = `<div class="text-red-400">Analysis failed: ${
+              data?.message || "Unknown error"
+            }</div>`;
+            return;
+          }
 
-    const sel = document.getElementById("squadPositionSelect");
-    if (sel && sel.options.length <= 1 && Array.isArray(data.positions_found)) {
-      sel.innerHTML =
-        `<option value="ALL">Full Squad Audit</option>` +
-        data.positions_found.map((p) => `<option value="${p}">${p}</option>`).join("");
-    }
+          const sel = document.getElementById("squadPositionSelect");
+          if (
+            sel &&
+            sel.options.length <= 1 &&
+            Array.isArray(data.positions_found)
+          ) {
+            sel.innerHTML =
+              `<option value="ALL">Full Squad Audit</option>` +
+              data.positions_found
+                .map((p) => `<option value="${p}">${p}</option>`)
+                .join("");
+          }
 
-    const report = data.report || [];
-    if (!report.length) {
-      box.innerHTML = `<div class="text-yellow-400">No analyzable positions found in the uploaded CSV.</div>`;
-      return;
-    }
+          const report = data.report || [];
+          if (!report.length) {
+            box.innerHTML = `<div class="text-yellow-400">No analyzable positions found in the uploaded CSV.</div>`;
+            return;
+          }
 
-    // reset click map each run
-    lastSquadTargets = {};
+          lastSquadTargets = {};
 
-    box.innerHTML = report.map((block) => {
-      lastSquadTargets[block.position] = block.targets || [];
+          box.innerHTML = report
+            .map((block) => {
+              lastSquadTargets[block.position] = block.targets || [];
 
-      const gapsHtml = (block.gaps || []).map(([attr, squadAvg, eliteAvg, gap]) => `
-        <div class="flex justify-between text-xs border-b border-gray-800 py-1">
-          <span class="text-gray-300">${niceName(attr)}</span>
-          <span class="text-gray-500">Squad ${squadAvg}</span>
-          <span class="text-gray-500">Elite ${eliteAvg}</span>
-          <span class="${gap > 0 ? "text-red-400" : "text-green-400"}">Δ ${gap}</span>
-        </div>
-      `).join("");
+              const gapsHtml = (block.gaps || [])
+                .map(
+                  ([attr, squadAvg, eliteAvg, gap]) => `
+                <div class="flex justify-between text-xs border-b border-gray-800 py-1">
+                  <span class="text-gray-300">${niceName(attr)}</span>
+                  <span class="text-gray-500">Squad ${squadAvg}</span>
+                  <span class="text-gray-500">Elite ${eliteAvg}</span>
+                  <span class="${
+                    gap > 0 ? "text-red-400" : "text-green-400"
+                  }">Δ ${gap}</span>
+                </div>
+              `
+                )
+                .join("");
 
-      const reasoningHtml = (block.reasoning || [])
-        .map((line) => `<div class="text-xs text-gray-300">${line}</div>`)
-        .join("");
+              const reasoningHtml = (block.reasoning || [])
+                .map((line) => `<div class="text-xs text-gray-300">${line}</div>`)
+                .join("");
 
-      const targetsHtml = (block.targets || []).map((t, idx) => `
-        <div
-          class="squad-target flex items-center justify-between p-2 bg-gray-800 border border-gray-700 rounded cursor-pointer hover:border-green-500"
-          data-pos="${block.position}"
-          data-idx="${idx}"
-        >
-          <div class="flex items-center gap-2">
-            <img src="${t.player_face_url || ""}" class="w-8 h-8 rounded-full border border-green-500 object-cover" onerror="this.style.display='none'">
-            <div>
-              <div class="text-xs font-bold text-green-300">${t.short_name}</div>
-              <div class="text-[10px] text-gray-500">${t.club_position} • €${Math.round((t.value_eur || 0) / 1e6)}M</div>
-            </div>
-          </div>
-          <div class="text-sm font-bold text-white">${t.overall || ""}</div>
-        </div>
-      `).join("");
+              const targetsHtml = (block.targets || [])
+                .map(
+                  (t, idx) => `
+                <div
+                  class="squad-target flex items-center justify-between p-2 bg-gray-800 border border-gray-700 rounded cursor-pointer hover:border-green-500"
+                  data-pos="${block.position}"
+                  data-idx="${idx}"
+                >
+                  <div class="flex items-center gap-2">
+                    <img src="${t.player_face_url || ""}" class="w-8 h-8 rounded-full border border-green-500 object-cover" onerror="this.style.display='none'">
+                    <div>
+                      <div class="text-xs font-bold text-green-300">${t.short_name}</div>
+                      <div class="text-[10px] text-gray-500">${t.club_position} • €${Math.round(
+                        (t.value_eur || 0) / 1e6
+                      )}M</div>
+                    </div>
+                  </div>
+                  <div class="text-sm font-bold text-white">${t.overall || ""}</div>
+                </div>
+              `
+                )
+                .join("");
 
-      return `
-        <div class="p-4 bg-gray-900 border border-gray-700 rounded-lg">
-          <div class="flex items-center justify-between">
-            <div class="text-sm font-bold text-green-400">${block.position} — Gap Report</div>
-            <div class="text-xs text-gray-400">Squad ${block.squad_score} vs Elite ${block.elite_score}</div>
-          </div>
+              return `
+              <div class="p-4 bg-gray-900 border border-gray-700 rounded-lg">
+                <div class="flex items-center justify-between">
+                  <div class="text-sm font-bold text-green-400">${block.position} — Gap Report</div>
+                  <div class="text-xs text-gray-400">Squad ${block.squad_score} vs Elite ${block.elite_score}</div>
+                </div>
 
-          <div class="mt-2 text-xs text-yellow-300 font-semibold">
-            Recommended Profile: ${block.archetype}
-          </div>
+                <div class="mt-2 text-xs text-yellow-300 font-semibold">
+                  Recommended Profile: ${block.archetype}
+                </div>
 
-          <div class="mt-3">
-            <div class="text-xs text-gray-500 mb-1">Biggest Gaps</div>
-            ${gapsHtml}
-          </div>
+                <div class="mt-3">
+                  <div class="text-xs text-gray-500 mb-1">Biggest Gaps</div>
+                  ${gapsHtml}
+                </div>
 
-          <div class="mt-3 ai-suggestion">
-            <div class="text-xs font-bold text-yellow-300 mb-1">AI Reasoning</div>
-            ${reasoningHtml}
-          </div>
+                <div class="mt-3 ai-suggestion">
+                  <div class="text-xs font-bold text-yellow-300 mb-1">AI Reasoning</div>
+                  ${reasoningHtml}
+                </div>
 
-          <div class="mt-3">
-            <div class="text-xs text-gray-500 mb-2">Suggested Targets</div>
-            <div class="space-y-2">
-              ${targetsHtml || `<div class="text-xs text-gray-500 italic">No targets found.</div>`}
-            </div>
-          </div>
-        </div>
-      `;
-    }).join("");
-
-  } catch (err) {
-    console.error(err);
-    box.innerHTML = `<div class="text-red-400">Error connecting to server.</div>`;
-  }
-}
-
-
-
-
-
+                <div class="mt-3">
+                  <div class="text-xs text-gray-500 mb-2">Suggested Targets</div>
+                  <div class="space-y-2">
+                    ${
+                      targetsHtml ||
+                      `<div class="text-xs text-gray-500 italic">No targets found.</div>`
+                    }
+                  </div>
+                </div>
+              </div>
+            `;
+            })
+            .join("");
+        } catch (err) {
+          console.error(err);
+          box.innerHTML = `<div class="text-red-400">Error connecting to server.</div>`;
+        }
+      }
 
       /* --- DATA HANDLERS --- */
       async function handleFindPlayers() {
-  recommendations.innerHTML = '<div class="spinner mx-auto"></div>';
+        recommendations.innerHTML = '<div class="spinner mx-auto"></div>';
 
-  const position = posSelect.value;
+        const position = posSelect.value;
 
-  // --- Core Filters ---
-  const overallMin = Number(document.getElementById("overall_min").value);
-  const overallMax = Number(document.getElementById("overall_max").value);
-  const ageMin = Number(document.getElementById("age_min").value);
-  const ageMax = Number(document.getElementById("age_max").value);
+        const overallMin = Number(document.getElementById("overall_min").value);
+        const overallMax = Number(document.getElementById("overall_max").value);
+        const ageMin = Number(document.getElementById("age_min").value);
+        const ageMax = Number(document.getElementById("age_max").value);
 
-  // Value sliders are in M£ in UI -> convert to EUR (approx)
-  const valueMinMgbp = Number(document.getElementById("value_min").value);
-  const valueMaxMgbp = Number(document.getElementById("value_max").value);
-  const valueMinGbp = valueMinMgbp * 1_000_000;
-  const valueMaxGbp = valueMaxMgbp * 1_000_000;
-  const valueMinEur = Math.round(valueMinGbp / 0.85);
-  const valueMaxEur = Math.round(valueMaxGbp / 0.85);
+        // Value sliders are M£ -> convert to EUR (approx)
+        const valueMinMgbp = Number(document.getElementById("value_min").value);
+        const valueMaxMgbp = Number(document.getElementById("value_max").value);
+        const valueMinGbp = valueMinMgbp * 1_000_000;
+        const valueMaxGbp = valueMaxMgbp * 1_000_000;
+        const valueMinEur = Math.round(valueMinGbp / 0.85);
+        const valueMaxEur = Math.round(valueMaxGbp / 0.85);
 
-  const body = {
-    position,
-    filters: {
-      overall: [overallMin, overallMax],
-      age: [ageMin, ageMax],
-      value_eur: [valueMinEur, valueMaxEur],
-    },
-    weights: {},
-    data_source: "base",
-  };
+        const body = {
+          position,
+          filters: {
+            overall: [overallMin, overallMax],
+            age: [ageMin, ageMax],
+            value_eur: [valueMinEur, valueMaxEur],
+          },
+          weights: {},
+          data_source: "base",
+        };
 
-  // --- Dynamic metric filters (pace_min/max etc) ---
-  // We only include metrics that exist for that position
-  const metricList = POSITION_METRICS[position]?.display || [];
-  metricList.forEach((m) => {
-    const minEl = document.getElementById(`${m}_min`);
-    const maxEl = document.getElementById(`${m}_max`);
-    if (minEl && maxEl) {
-      body.filters[m] = [Number(minEl.value), Number(maxEl.value)];
-    }
-  });
+        const metricList = POSITION_METRICS[position]?.display || [];
+        metricList.forEach((m) => {
+          const minEl = document.getElementById(`${m}_min`);
+          const maxEl = document.getElementById(`${m}_max`);
+          if (minEl && maxEl) {
+            body.filters[m] = [Number(minEl.value), Number(maxEl.value)];
+          }
+        });
 
-  // --- Weight sliders ---
-  const weightList = POSITION_METRICS[position]?.weights || [];
-  weightList.forEach((m) => {
-    const wEl = document.getElementById(`weight_${m}`);
-    if (wEl) body.weights[m] = Number(wEl.value);
-  });
+        const weightList = POSITION_METRICS[position]?.weights || [];
+        weightList.forEach((m) => {
+          const wEl = document.getElementById(`weight_${m}`);
+          if (wEl) body.weights[m] = Number(wEl.value);
+        });
 
-  try {
-    const data = await safePost("/find_players", body);
-    recommendations.innerHTML = "";
+        try {
+          const data = await safePost("/find_players", body);
+          recommendations.innerHTML = "";
 
-    if (!data?.players?.length) {
-      recommendations.innerHTML =
-        '<p class="text-gray-500">No players found.</p>';
-      return;
-    }
+          if (!data?.players?.length) {
+            recommendations.innerHTML =
+              '<p class="text-gray-500">No players found.</p>';
+            return;
+          }
 
-    data.players.forEach((p) => recommendations.appendChild(renderPlayerCard(p)));
-  } catch (err) {
-    console.error(err);
-    recommendations.innerHTML =
-      '<p class="text-red-500 text-center">Error connecting to scouting server.</p>';
-  }
-}
+          data.players.forEach((p) =>
+            recommendations.appendChild(renderPlayerCard(p))
+          );
+        } catch (err) {
+          console.error(err);
+          recommendations.innerHTML =
+            '<p class="text-red-500 text-center">Error connecting to scouting server.</p>';
+        }
+      }
 
+      async function handleSearchPlayers() {
+        const q = playerNameSearch.value.trim();
+        if (!q) return;
 
-async function handleSearchPlayers() {
-  const q = playerNameSearch.value.trim();
-  if (!q) return;
+        playerSearchResults.innerHTML = '<div class="spinner"></div>';
 
-  playerSearchResults.innerHTML = '<div class="spinner"></div>';
-
-  try {
-    const data = await safePost("/search_player", { player_name: q });
-    playerSearchResults.innerHTML = "";
-    (data || []).forEach((pl) => playerSearchResults.appendChild(renderPlayerCard(pl)));
-  } catch (err) {
-    console.error(err);
-    playerSearchResults.innerHTML =
-      '<p class="text-red-500 text-center mt-4">Error connecting to scouting server.</p>';
-  }
-}
-
+        try {
+          const data = await safePost("/search_player", { player_name: q });
+          playerSearchResults.innerHTML = "";
+          (data || []).forEach((pl) =>
+            playerSearchResults.appendChild(renderPlayerCard(pl))
+          );
+        } catch (err) {
+          console.error(err);
+          playerSearchResults.innerHTML =
+            '<p class="text-red-500 text-center mt-4">Error connecting to scouting server.</p>';
+        }
+      }
 
       async function handleBudgetTargeting() {
-  const list = document.getElementById("targetResults");
-  list.innerHTML =
-    '<div class="flex justify-center py-10"><div class="spinner"></div></div>';
+        const list = document.getElementById("targetResults");
+        list.innerHTML =
+          '<div class="flex justify-center py-10"><div class="spinner"></div></div>';
 
-  try {
-    const data = await safePost("/budget_target", {
-      max_wage: document.getElementById("maxWage").value,
-      contract_year: document.getElementById("contractYear").value
-    });
+        try {
+          const data = await safePost("/budget_target", {
+            max_wage: document.getElementById("maxWage").value,
+            contract_year: document.getElementById("contractYear").value,
+          });
 
-    // ✅ NORMALIZE TARGET DATA
-    currentTargets = (data.targets || []).map((p) => ({
-      ...p,
-      full_attributes: p.full_attributes || p.full_stats || {}
-    }));
+          currentTargets = (data.targets || []).map((p) => ({
+            ...p,
+            full_attributes: p.full_attributes || p.full_stats || {},
+          }));
 
-    if (currentTargets.length === 0) {
-      list.innerHTML =
-        '<p class="text-center text-gray-500 mt-10">No players found matching these financial constraints.</p>';
-      return;
-    }
+          if (currentTargets.length === 0) {
+            list.innerHTML =
+              '<p class="text-center text-gray-500 mt-10">No players found matching these financial constraints.</p>';
+            return;
+          }
 
-    // ✅ RENDER TARGETS (clickable)
-    list.innerHTML = currentTargets
-      .map(
-        (p, i) => `
-        <div
-          class="flex justify-between items-center p-3 bg-gray-800 rounded border border-gray-700 mb-2 cursor-pointer hover:border-green-500"
-          onclick="loadPlayerDetails(currentTargets[${i}]);"
-        >
-          <div>
-            <div class="text-sm font-bold text-green-400">${p.short_name}</div>
-            <div class="text-xs text-gray-500">
-              Exp: ${p.contract_end} | ${fmtGBPFromEur(p.wage_yearly)}/yr
+          list.innerHTML = currentTargets
+            .map(
+              (p, i) => `
+              <div
+                class="flex justify-between items-center p-3 bg-gray-800 rounded border border-gray-700 mb-2 cursor-pointer hover:border-green-500"
+                onclick="loadPlayerDetails(currentTargets[${i}]);"
+              >
+                <div>
+                  <div class="text-sm font-bold text-green-400">${p.short_name}</div>
+                  <div class="text-xs text-gray-500">
+                    Exp: ${p.contract_end} | ${fmtGBPFromEur(p.wage_yearly)}/yr
+                  </div>
+                </div>
+                <div class="text-lg font-bold text-white">${p.overall}</div>
+              </div>
+            `
+            )
+            .join("");
+        } catch (err) {
+          console.error("Targeting Error:", err);
+          list.innerHTML =
+            '<p class="text-red-500 text-center mt-10">Error connecting to scouting server.</p>';
+        }
+      }
+
+      function renderPlayerCard(player) {
+        const attrs = player.full_attributes || {};
+        const overall = player.overall ?? attrs.overall ?? "";
+        const face = player.player_face_url ?? attrs.player_face_url ?? "";
+
+        const card = document.createElement("div");
+        card.className =
+          "bg-gray-800 p-4 rounded-xl border border-gray-700 hover:scale-105 transition-transform cursor-pointer";
+        card.innerHTML = `
+          <div class="flex items-center gap-3">
+            <img src="${face}" class="w-16 h-16 rounded-full border-2 border-green-500 object-cover" onerror="this.style.display='none'">
+            <div class="flex-1">
+              <div class="font-bold text-green-300">${player.short_name}</div>
+              <div class="text-xs text-gray-400">${player.club_position} ${
+          overall ? `• OVR ${overall}` : ""
+        }</div>
             </div>
           </div>
-          <div class="text-lg font-bold text-white">${p.overall}</div>
-        </div>
-      `
-      )
-      .join("");
-  } catch (err) {
-    console.error("Targeting Error:", err);
-    list.innerHTML =
-      '<p class="text-red-500 text-center mt-10">Error connecting to scouting server.</p>';
-  }
-}
+        `;
+        card.onclick = () => loadPlayerDetails(player);
+        return card;
+      }
 
-
-function renderPlayerCard(player) {
-  const attrs = player.full_attributes || {};
-  const overall = player.overall ?? attrs.overall ?? "";
-  const face = player.player_face_url ?? attrs.player_face_url ?? "";
-
-  const card = document.createElement("div");
-  card.className =
-    "bg-gray-800 p-4 rounded-xl border border-gray-700 hover:scale-105 transition-transform cursor-pointer";
-  card.innerHTML = `
-    <div class="flex items-center gap-3">
-      <img src="${face}" class="w-16 h-16 rounded-full border-2 border-green-500 object-cover" onerror="this.style.display='none'">
-      <div class="flex-1">
-        <div class="font-bold text-green-300">${player.short_name}</div>
-        <div class="text-xs text-gray-400">${player.club_position} ${overall ? `• OVR ${overall}` : ""}</div>
-      </div>
-    </div>
-  `;
-  card.onclick = () => loadPlayerDetails(player);
-  return card;
-}
-
-
-        function pickStat(attrs, keys, fallback = 50) {
-  for (const k of keys) {
-    const v = attrs?.[k];
-    if (typeof v === "number" && !Number.isNaN(v)) return v;
-  }
-  return fallback;
-}
-
+      function pickStat(attrs, keys, fallback = 50) {
+        for (const k of keys) {
+          const v = attrs?.[k];
+          if (typeof v === "number" && !Number.isNaN(v)) return v;
+        }
+        return fallback;
+      }
 
       function loadPlayerDetails(player) {
         document.getElementById(
@@ -1091,16 +1256,14 @@ function renderPlayerCard(player) {
             .join("") +
           `</tbody></table>`;
 
-        // Radar Data (Fixed keys for CSV)
         const data = [
-  pickStat(attrs, ["pace", "pac"]),
-  pickStat(attrs, ["shooting", "sho"]),
-  pickStat(attrs, ["passing", "pas"]),
-  pickStat(attrs, ["dribbling", "dri"]),
-  pickStat(attrs, ["defending", "defence", "def", "dfs"]),
-  pickStat(attrs, ["physic", "physicality", "physical", "phy"]),
-];
-
+          pickStat(attrs, ["pace", "pac"]),
+          pickStat(attrs, ["shooting", "sho"]),
+          pickStat(attrs, ["passing", "pas"]),
+          pickStat(attrs, ["dribbling", "dri"]),
+          pickStat(attrs, ["defending", "defence", "def", "dfs"]),
+          pickStat(attrs, ["physic", "physicality", "physical", "phy"]),
+        ];
 
         if (currentChart) currentChart.destroy();
         const ctx = document.getElementById("performanceChart").getContext("2d");
@@ -1121,7 +1284,6 @@ function renderPlayerCard(player) {
           options: { scales: { r: { suggestedMin: 30, suggestedMax: 100 } } },
         });
 
-        // Premium Gating
         const entitlements = JSON.parse(
           sessionStorage.getItem("momentum_entitlements") ||
             '{"analyst_ai":false}'
@@ -1200,222 +1362,199 @@ function renderPlayerCard(player) {
         handleLoadSavedTargets();
       }
 
-  /* =========================
-   PDF + PREMIUM UI (KEEP THIS VERSION)
-   ========================= */
-function handleExportPDF() {
-  const entitlements = JSON.parse(
-    sessionStorage.getItem("momentum_entitlements") || '{"export_csv": false}'
-  );
+      /* =========================
+         PDF + PREMIUM UI (Version 1 keeps the nicer PDF)
+         ========================= */
+      function handleExportPDF() {
+        const entitlements = JSON.parse(
+          sessionStorage.getItem("momentum_entitlements") ||
+            '{"export_csv": false}'
+        );
 
-  if (!entitlements.export_csv) {
-    alert(
-      "🔒 PREMIUM FEATURE: PDF Scouting Reports are only available for Tier 1 & Tier 2 subscribers. Please contact info@momentumscout.com to upgrade your plan."
-    );
-    return;
-  }
+        if (!entitlements.export_csv) {
+          alert(
+            "🔒 PREMIUM FEATURE: PDF Scouting Reports are only available for Tier 1 & Tier 2 subscribers. Please contact info@momentumscout.com to upgrade your plan."
+          );
+          return;
+        }
 
-  const playerName = document
-    .getElementById("analyticsHeader")
-    .textContent.split("-")[0]
-    .trim();
+        const playerName = document
+          .getElementById("analyticsHeader")
+          .textContent.split("-")[0]
+          .trim();
 
-  const chartImage = document
-    .getElementById("performanceChart")
-    .toDataURL("image/png");
+        const chartImage = document
+          .getElementById("performanceChart")
+          .toDataURL("image/png");
 
-  const statsHtml = document.getElementById("detailedStatsTable").innerHTML;
-  const reportHtml = document.getElementById("trainingRegime").innerHTML;
+        const statsHtml = document.getElementById("detailedStatsTable").innerHTML;
+        const reportHtml = document.getElementById("trainingRegime").innerHTML;
 
-  const printWindow = window.open("", "_blank");
+        const printWindow = window.open("", "_blank");
 
-  printWindow.document.write(`
-    <html>
-      <head>
-        <title>MomentumScout Report - ${playerName}</title>
-        <script src="https://cdn.tailwindcss.com"><\/script>
-        <style>
-          body { padding: 40px; font-family: sans-serif; }
-          .report-header { border-bottom: 4px solid #22c55e; padding-bottom: 20px; }
-          .chart-box { width: 100%; max-width: 500px; margin: 20px auto; }
-          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 11px; }
-          .ai-box { background: #f0fdf4; padding: 15px; border-left: 4px solid #22c55e; margin: 20px 0; }
-        </style>
-      </head>
-      <body>
-        <div class="report-header">
-          <h1 class="text-2xl font-bold">MomentumScout Pro Scouting Report</h1>
-          <p class="text-gray-500">Confidential Intelligence for ${playerName}</p>
-        </div>
+        printWindow.document.write(`
+          <html>
+            <head>
+              <title>MomentumScout Report - ${playerName}</title>
+              <script src="https://cdn.tailwindcss.com"><\/script>
+              <style>
+                body { padding: 40px; font-family: sans-serif; }
+                .report-header { border-bottom: 4px solid #22c55e; padding-bottom: 20px; }
+                .chart-box { width: 100%; max-width: 500px; margin: 20px auto; }
+                table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 11px; }
+                .ai-box { background: #f0fdf4; padding: 15px; border-left: 4px solid #22c55e; margin: 20px 0; }
+              </style>
+            </head>
+            <body>
+              <div class="report-header">
+                <h1 class="text-2xl font-bold">MomentumScout Pro Scouting Report</h1>
+                <p class="text-gray-500">Confidential Intelligence for ${playerName}</p>
+              </div>
 
-        <div class="chart-box"><img src="${chartImage}"></div>
-        <div class="ai-box"><h3 class="font-bold">MomentumAI Insights</h3>${reportHtml}</div>
-        <div class="mt-4">${statsHtml}</div>
+              <div class="chart-box"><img src="${chartImage}"></div>
+              <div class="ai-box"><h3 class="font-bold">MomentumAI Insights</h3>${reportHtml}</div>
+              <div class="mt-4">${statsHtml}</div>
 
-        <script>
-          window.onload = function () {
-            window.print();
-            window.close();
-          };
-        <\/script>
-      </body>
-    </html>
-  `);
+              <script>
+                window.onload = function () {
+                  window.print();
+                  window.close();
+                };
+              <\/script>
+            </body>
+          </html>
+        `);
 
-  printWindow.document.close();
-}
+        printWindow.document.close();
+      }
 
-function checkPremiumStatus() {
-  const entitlements = JSON.parse(
-    sessionStorage.getItem("momentum_entitlements") || '{"export_csv": false}'
-  );
+      function checkPremiumStatus() {
+        const entitlements = JSON.parse(
+          sessionStorage.getItem("momentum_entitlements") ||
+            '{"export_csv": false}'
+        );
 
-  const pdfBtn = document.getElementById("exportPdfBtn");
-  const lockIcon = document.getElementById("pdfLockIcon");
+        const pdfBtn = document.getElementById("exportPdfBtn");
+        const lockIcon = document.getElementById("pdfLockIcon");
 
-  if (entitlements.export_csv) {
-    if (pdfBtn) pdfBtn.classList.replace("bg-gray-700", "bg-red-600");
-    if (lockIcon) lockIcon.textContent = "📄";
-  }
-}
+        if (entitlements.export_csv) {
+          if (pdfBtn) pdfBtn.classList.replace("bg-gray-700", "bg-red-600");
+          if (lockIcon) lockIcon.textContent = "📄";
+        }
+      }
 
+      /* --- Comparison overlay (from Version 1) --- */
+      function compareFromShortlist(index) {
+        const saved = JSON.parse(localStorage.getItem("saved_targets") || "[]");
+        const player = saved[index] || currentTargets[index];
+        if (!player) return;
 
-/* =========================
-   METRIC SLIDER BLOCK (KEEP THIS VERSION)
-   ========================= */
-function sliderBlock(id, min, max, vMin, vMax) {
-  return `
-    <div class="fade-in">
-      <label class="block text-sm mb-1">
-        ${niceName(id)}:
-        <span id="${id}Val" class="text-gray-300">50 - 99</span>
-      </label>
-      <input id="${id}_min" class="attribute-slider mb-2" type="range" min="0" max="99" value="50">
-      <input id="${id}_max" class="attribute-slider" type="range" min="0" max="99" value="99">
-    </div>
-  `;
-}
+        if (document.getElementById("analytics").classList.contains("hidden")) {
+          loadPlayerDetails(player);
+          alert(
+            "Primary player loaded. Click another player's ⚡ icon to overlay comparison data."
+          );
+          return;
+        }
 
-function compareFromShortlist(index) {
-const saved = JSON.parse(localStorage.getItem("saved_targets") || "[]");
-const player = saved[index] || currentTargets[index];
-if (!player) return;
+        if (currentChart) {
+          const stats = player.full_attributes || {};
 
-  // If analytics tab is hidden, load first player normally
-  if (document.getElementById("analytics").classList.contains("hidden")) {
-    loadPlayerDetails(player);
-    alert(
-      "Primary player loaded. Click another player's ⚡ icon to overlay comparison data."
-    );
-    return;
-  }
+          const comparisonData = [
+            stats.pace || 50,
+            stats.shooting || 50,
+            stats.passing || 50,
+            stats.dribbling || 50,
+            stats.defending || 50,
+            stats.physic || stats.physicality || 50,
+          ];
 
-  // Add comparison dataset to existing radar chart
-  if (currentChart) {
-    const stats = player.full_attributes || {};
+          currentChart.data.datasets.push({
+            label: `${player.short_name} (Comparison)`,
+            data: comparisonData,
+            backgroundColor: "rgba(250, 204, 21, 0.2)",
+            borderColor: "#facc15",
+            pointBackgroundColor: "#fff",
+          });
 
-    const comparisonData = [
-      stats.pace || 50,
-      stats.shooting || 50,
-      stats.passing || 50,
-      stats.dribbling || 50,
-      stats.defending || 50,
-      stats.physic || stats.physicality || 50,
-    ];
+          currentChart.update();
 
-    currentChart.data.datasets.push({
-      label: `${player.short_name} (Comparison)`,
-      data: comparisonData,
-      backgroundColor: "rgba(250, 204, 21, 0.2)",
-      borderColor: "#facc15",
-      pointBackgroundColor: "#fff",
-    });
+          document.getElementById("analyticsHeader").textContent =
+            "Player Head-to-Head Comparison";
 
-    currentChart.update();
+          switchTab("analytics");
+        }
+      }
 
-    document.getElementById("analyticsHeader").textContent =
-      "Player Head-to-Head Comparison";
+      /* =========================
+         FINAL BOOTSTRAP (Version 1 style, includes squad click delegation)
+         ========================= */
+      document.addEventListener("DOMContentLoaded", () => {
+        // Bind elements
+        posSelect = document.getElementById("position");
+        coreSliders = document.getElementById("coreSliders");
+        dynMetrics = document.getElementById("dynamicMetrics");
+        weightContainer = document.getElementById("weightingSliders");
+        recommendations = document.getElementById("recommendations");
 
-    switchTab("analytics");
-  }
-}
+        playerSearchResults = document.getElementById("playerSearchResults");
+        searchStatus = document.getElementById("searchStatus");
+        playerNameSearch = document.getElementById("playerNameSearch");
 
-/* =========================
-   FINAL BOOTSTRAP (REQUIRED)
-   Put this at the END of the script
-   ========================= */
+        modal = document.getElementById("playerModal");
+        modalInner = document.getElementById("modalInner");
+        closeModal = document.getElementById("closeModal");
 
-   document.addEventListener("DOMContentLoaded", () => {
-  // --- Bind Elements ---
-  posSelect = document.getElementById("position");
-  coreSliders = document.getElementById("coreSliders");
-  dynMetrics = document.getElementById("dynamicMetrics");
-  weightContainer = document.getElementById("weightingSliders");
-  recommendations = document.getElementById("recommendations");
+        findBtn = document.getElementById("findPlayersBtn");
+        resetBtn = document.getElementById("resetBtn");
+        searchBtn = document.getElementById("searchPlayerBtn");
 
-  playerSearchResults = document.getElementById("playerSearchResults");
-  searchStatus = document.getElementById("searchStatus");
-  playerNameSearch = document.getElementById("playerNameSearch");
+        analyzeSquadBtn = document.getElementById("analyzeSquadBtn");
+        targetPlayersBtn = document.getElementById("targetPlayersBtn");
 
+        squadPositionSelect = document.getElementById("squadPositionSelect");
 
-  modal = document.getElementById("playerModal");
-  modalInner = document.getElementById("modalInner");
-  closeModal = document.getElementById("closeModal");
+        detailedStatsTable = document.getElementById("detailedStatsTable");
+        trainingRegime = document.getElementById("trainingRegime");
 
-  findBtn = document.getElementById("findPlayersBtn");
-  resetBtn = document.getElementById("resetBtn");
-  searchBtn = document.getElementById("searchPlayerBtn");
+        // Safety checks
+        if (!posSelect || !coreSliders || !recommendations) {
+          console.error("❌ Missing core DOM elements — check your HTML ids.");
+          return;
+        }
 
-  analyzeSquadBtn = document.getElementById("analyzeSquadBtn");
-  targetPlayersBtn = document.getElementById("targetPlayersBtn");
+        // ✅ Squad target click delegation (Version 1)
+        const gapBox = document.getElementById("gapAnalysisResults");
+        if (gapBox) {
+          gapBox.addEventListener("click", (e) => {
+            const card = e.target.closest(".squad-target");
+            if (!card) return;
 
-  squadPositionSelect = document.getElementById("squadPositionSelect");
+            const pos = card.dataset.pos;
+            const idx = Number(card.dataset.idx);
+            const player = lastSquadTargets?.[pos]?.[idx];
+            if (!player) return;
 
-  detailedStatsTable = document.getElementById("detailedStatsTable");
-  trainingRegime = document.getElementById("trainingRegime");
+            loadPlayerDetails(player);
+            switchTab("analytics");
+          });
+        }
 
-  // --- Safety checks (helps debugging) ---
-  if (!posSelect || !coreSliders || !recommendations) {
-    console.error("❌ Missing core DOM elements — check your HTML ids.");
-    return;
-  }
-
-    // ✅ Squad gap analysis: click a suggested target to open analytics safely
-    const gapBox = document.getElementById("gapAnalysisResults");
-  if (gapBox) {
-    gapBox.addEventListener("click", (e) => {
-      const card = e.target.closest(".squad-target");
-      if (!card) return;
-
-      const pos = card.dataset.pos;
-      const idx = Number(card.dataset.idx);
-      const player = lastSquadTargets?.[pos]?.[idx];
-      if (!player) return;
-
-      loadPlayerDetails(player);
-      switchTab("analytics");
-    });
-  }
-
-
-  // --- Build initial UI ---
-  try {
-    populatePositionOptions(); 
-    buildCoreSliders();                 // must exist earlier in your file
-    buildPositionMetrics(posSelect.value);
-    buildWeightSliders(posSelect.value);
-    setupSliderListeners();
-    setupEventListeners();
-    checkPremiumStatus();
-  } catch (e) {
-    console.error("❌ Bootstrap failed:", e);
-  }
-});
-
-
-
+        // Build initial UI + listeners
+        try {
+          populatePositionOptions();
+          buildCoreSliders();
+          buildPositionMetrics(posSelect.value);
+          buildWeightSliders(posSelect.value);
+          setupSliderListeners();
+          setupEventListeners();
+          handleLoadSavedTargets();
+          checkPremiumStatus();
+        } catch (e) {
+          console.error("❌ Bootstrap failed:", e);
+        }
+      });
     </script>
-    
- </body>
-  </html>
+  </body>
+</html>

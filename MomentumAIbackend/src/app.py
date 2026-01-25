@@ -1,11 +1,9 @@
 """
-MomentumScout Backend V1.1 (Robust)
+MomentumScout Backend V1.1 (Robust) - Revised
 ---------------------------------------------------------
-- Robust CORS (single source of truth)
-- Demo signup saved to CSV + emailed + optionally pushed to Google Sheets (Apps Script)
-- Verify login supports:
-  1) Static portal codes (SCOUT2025 / BALLER2025)
-  2) Per-user access_code stored in signups.csv
+- Fixes for Google Sheets posting bug, email sender guard, budget target guards,
+  and safer Mail handling to avoid blocking/undefined variables.
+- Minor defensive checks and clearer logging.
 ---------------------------------------------------------
 """
 
@@ -13,29 +11,25 @@ import os
 import secrets
 from io import StringIO
 from datetime import datetime
+import traceback
+import threading
 
 import numpy as np
 import pandas as pd
 import requests
 from flask import Flask, request, jsonify, send_from_directory, make_response
 from flask_mail import Mail, Message
-import threading
-import traceback
-
-
 
 # ----------------------------------------------------
 # APP INIT
 # ----------------------------------------------------
 app = Flask(__name__, static_folder="public")
 
-
 # ----------------------------------------------------
 # CORS CONFIG (ROBUST + SAFE)
 # ----------------------------------------------------
 FRONTEND_URL = (os.environ.get("FRONTEND_URL", "https://momentum-ai-io.netlify.app") or "").rstrip("/")
 
-# Use a set for fast membership checks
 ALLOWED_ORIGINS = {
     FRONTEND_URL,
     "https://momentumscout.netlify.app",
@@ -49,30 +43,19 @@ ALLOWED_ORIGINS = {
     "http://localhost:5500",
     "http://127.0.0.1:5500",
 }
-
-# Clean empty strings if FRONTEND_URL env not set
 ALLOWED_ORIGINS = {o for o in ALLOWED_ORIGINS if o and isinstance(o, str)}
 
 def _cors_origin():
-    """
-    Return the request Origin if it is explicitly allowed.
-    """
     origin = request.headers.get("Origin")
     if origin and origin in ALLOWED_ORIGINS:
         return origin
     return None
 
 def _add_cors_headers(resp):
-    """
-    Always attach CORS headers when Origin is allowed.
-    This runs for normal responses and also error responses.
-    """
     origin = _cors_origin()
     if origin:
         resp.headers["Access-Control-Allow-Origin"] = origin
         resp.headers["Vary"] = "Origin"
-        # You are NOT using cookies-based auth, but leaving this true won't break.
-        # If you ever enable credentials, you must NOT use '*' origin.
         resp.headers["Access-Control-Allow-Credentials"] = "true"
         resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
         resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
@@ -80,7 +63,6 @@ def _add_cors_headers(resp):
 
 @app.before_request
 def cors_preflight():
-    # Handle all OPTIONS requests centrally
     if request.method == "OPTIONS":
         resp = make_response("", 204)
         return _add_cors_headers(resp)
@@ -103,17 +85,16 @@ app.config["MAIL_USE_SSL"] = (os.environ.get("MAIL_USE_SSL", "False") == "True")
 app.config["MAIL_USERNAME"] = MAIL_USERNAME
 app.config["MAIL_PASSWORD"] = MAIL_PASSWORD
 
-# ✅ IMPORTANT: prevent SMTP hangs (fixes worker timeout / fake CORS errors)
+# Prevent SMTP hangs
 app.config["MAIL_TIMEOUT"] = int(os.environ.get("MAIL_TIMEOUT", "10"))
 
-
-
-
-# IMPORTANT: sender email should match MAIL_USERNAME mailbox
-app.config["MAIL_DEFAULT_SENDER"] = (
-    "MomentumScout Intelligence",
-    MAIL_USERNAME,
-)
+# MAIL_DEFAULT_SENDER: ensure fallback if MAIL_USERNAME missing
+if MAIL_USERNAME:
+    app.config["MAIL_DEFAULT_SENDER"] = ("MomentumScout Intelligence", MAIL_USERNAME)
+else:
+    # fallback to a sensible default address (avoid None)
+    app.config["MAIL_DEFAULT_SENDER"] = ("MomentumScout Intelligence", "info@momentumscout.com")
+    print("⚠️ MAIL_USERNAME not set; using fallback default sender info@momentumscout.com", flush=True)
 
 if not MAIL_USERNAME or not MAIL_PASSWORD:
     print("❌ Missing MAIL_USERNAME or MAIL_PASSWORD env vars", flush=True)
@@ -136,7 +117,6 @@ def _send_emails_bg(app, internal_msg, customer_msg):
         except Exception as e:
             print("❌ Customer email failed:", repr(e), flush=True)
             traceback.print_exc()
-
 
 
 # ----------------------------------------------------
@@ -184,27 +164,22 @@ ENTITLEMENTS_MAP = {
     "Admin": {"analyst_ai": True, "export_csv": True},
 }
 
-# ----------------------------------------------------
-# OWNER / ADMIN OVERRIDE
-# ----------------------------------------------------
 OWNER_EMAILS = {
     "info@momentumscout.com",
-    "info@fizmaygroup.com",   # add your real owner email(s)
-    "fisayo.s19@gmail.com",   # optional
+    "info@fizmaygroup.com",
+    "fisayo.s19@gmail.com",
 }
 
 def is_owner(email: str) -> bool:
     return (email or "").strip().lower() in OWNER_EMAILS
 
-
-# Global Data Variables
+# Global data
 player_data_base = None
 player_data_baller = None
 next_match_data = None
 
-
 # ----------------------------------------------------
-# DATABASES (WEIGHTS & DRILLS)
+# WEIGHTS & DRILLS (unchanged)
 # ----------------------------------------------------
 DRILL_DATABASE = {
     "pace": "Speed ladders and resistance sprint training.",
@@ -248,7 +223,6 @@ POSITION_MAP = {
     "ST": "ST", "CM": "CM", "CB": "CB", "GK": "GK",
 }
 
-
 # ----------------------------------------------------
 # HELPERS
 # ----------------------------------------------------
@@ -275,7 +249,6 @@ def safe_float(val, default=0.0):
 
 def clean_column_name(col_name):
     return str(col_name).strip().lower().replace(" ", "_").replace(".", "").replace("%", "_pct")
-
 
 # ----------------------------------------------------
 # USER MANAGEMENT (CSV)
@@ -308,6 +281,7 @@ def save_signup(data):
         return True
     except Exception as e:
         print("Save signup failed:", repr(e), flush=True)
+        traceback.print_exc()
         return False
 
 def check_login_status(email: str):
@@ -329,7 +303,6 @@ def check_login_status(email: str):
         plan = user.get("plan", "monthly")
         signup_str = user.get("timestamp", datetime.now().isoformat())
 
-        # 14-day trial check
         try:
             signup_date = pd.to_datetime(signup_str).to_pydatetime()
             days_since = (datetime.now() - signup_date).days
@@ -358,8 +331,9 @@ def check_login_status(email: str):
         }
 
     except Exception as e:
+        print("check_login_status error:", repr(e), flush=True)
+        traceback.print_exc()
         return False, f"System Error: {str(e)}", {}
-
 
 def log_analyst_usage(email, player_name):
     fp = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_AUDIT)
@@ -371,9 +345,8 @@ def log_analyst_usage(email, player_name):
     except Exception:
         pass
 
-
 # ----------------------------------------------------
-# AI / DATA HELPERS
+# AI / DATA HELPERS (unchanged)
 # ----------------------------------------------------
 def generate_training_plan(row, position, is_baller=False):
     plan = {"weakness": "General Conditioning", "drills": ["Standard fitness regime", "Tactical positioning review"]}
@@ -485,66 +458,55 @@ def _normalize_positions(series: pd.Series) -> pd.Series:
     return series.map(_map_one)
 
 def _archetype_from_gaps(position: str, weakest_attrs: list) -> str:
-    # lightweight "AI reasoning" archetype labels
     w = set(weakest_attrs)
-
     if position in ["CB"]:
         if "pace" in w and "defending_standing_tackle" in w:
             return "Recovery CB (fast, strong in duels)"
         if "passing" in w or "mentality_vision" in w:
             return "Ball-Playing CB (progressive passer)"
         return "Dominant Stopper (duels, positioning)"
-
     if position in ["LB", "RB"]:
         if "pace" in w and "power_stamina" in w:
             return "High-Engine Fullback (overlaps all game)"
         if "attacking_crossing" in w:
             return "Creative Fullback (final-third delivery)"
         return "Defensive Fullback (1v1, positioning)"
-
     if position in ["CDM"]:
         if "mentality_interceptions" in w or "defending_standing_tackle" in w:
             return "Ball-Winning #6 (screen + recoveries)"
         if "passing" in w:
             return "Deep-Lying Playmaker (build-up controller)"
         return "Hybrid #6 (duels + circulation)"
-
     if position in ["CM"]:
         if "power_stamina" in w:
             return "Box-to-Box (engine + pressure resistance)"
         if "passing" in w or "mentality_vision" in w:
             return "Tempo Setter (progression + chance creation)"
         return "All-round CM (balance + retention)"
-
     if position in ["CAM"]:
         if "shooting" in w:
             return "Chance Creator 10 (final pass priority)"
         if "passing" in w or "mentality_vision" in w:
             return "Creative 10 (through balls + linking)"
         return "Attacking 10 (arrivals + box threat)"
-
     if position in ["LW", "RW"]:
         if "pace" in w and "dribbling" in w:
             return "1v1 Winger (isolation + beating man)"
         if "shooting" in w:
             return "Inside Forward (goal threat)"
         return "Wide Creator (crossing + combinations)"
-
     if position in ["ST", "CF"]:
         if "attacking_finishing" in w:
             return "Clinical Finisher (conversion boost)"
         if "pace" in w:
             return "Run-in-behind Striker (depth threat)"
         return "Complete Forward (link + finish)"
-
     if position == "GK":
         return "Shot-stopper GK (reflexes + handling)"
-
     return "Role Upgrade"
 
-
 # ----------------------------------------------------
-# DATA LOADERS
+# DATA LOADERS (unchanged logic, small guards)
 # ----------------------------------------------------
 def _load_baller_league_data(filename):
     fp = os.path.join(DATA_FOLDER_PATH, filename)
@@ -558,32 +520,26 @@ def _load_baller_league_data(filename):
             if "name" not in df.columns:
                 continue
             merged = df if merged is None else pd.merge(merged, df, on=["name"], how="outer", suffixes=("", "_dup"))
-
         if merged is None:
             return pd.DataFrame()
-
         merged = merged.fillna(0)
         merged["short_name"] = merged.get("name", "Unknown")
-
         raw_pos = merged.get("position", merged.get("pos", "Baller"))
         if isinstance(raw_pos, pd.Series):
             merged["club_position"] = raw_pos.map(lambda x: POSITION_MAP.get(str(x).upper(), "Baller"))
         else:
             merged["club_position"] = "Baller"
-
         goals = pd.to_numeric(merged.get("goals", 0), errors="coerce").fillna(0)
         assists = pd.to_numeric(merged.get("assists", 0), errors="coerce").fillna(0)
         tackles = pd.to_numeric(merged.get("tackles", 0), errors="coerce").fillna(0)
-
         if "momentum_score" not in merged.columns:
             merged["momentum_score"] = (goals * 5) + (assists * 3) + (tackles * 2)
-
         merged["overall"] = 50 + (merged["momentum_score"].clip(upper=50)).astype(int)
         merged["potential"] = merged["overall"] + 5
         merged["value_eur"] = merged["momentum_score"] * 10000
         return merged
-
     except Exception:
+        traceback.print_exc()
         return pd.DataFrame()
 
 def _load_next_match_data(filename):
@@ -595,6 +551,7 @@ def _load_next_match_data(filename):
         df.columns = [clean_column_name(c) for c in df.columns]
         return df.iloc[0].to_dict() if not df.empty else None
     except Exception:
+        traceback.print_exc()
         return None
 
 def _load_fc26_data(filename):
@@ -604,18 +561,16 @@ def _load_fc26_data(filename):
     try:
         df = pd.read_csv(fp, encoding="utf-8-sig") if filename.endswith(".csv") else pd.read_excel(fp)
     except Exception:
+        traceback.print_exc()
         return pd.DataFrame()
-
     df.columns = [clean_column_name(c) for c in df.columns]
-
-    numeric_cols = [col for col in df.columns if df[col].dtype == "object"]
-    for col in numeric_cols:
-        try:
-            if any(x in col for x in ["overall", "value", "wage", "pace", "shooting", "passing", "dribbling", "defending", "physic", "age", "contract"]):
+    # convert likely numeric columns to numeric safely
+    for col in df.columns:
+        if any(x in col for x in ["overall", "value", "wage", "pace", "shooting", "passing", "dribbling", "defending", "physic", "age", "contract"]):
+            try:
                 df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-        except Exception:
-            pass
-
+            except Exception:
+                pass
     if "sofifa_id" in df.columns:
         def get_face_url(x):
             try:
@@ -626,17 +581,14 @@ def _load_fc26_data(filename):
             except Exception:
                 return ""
         df["player_face_url"] = df["sofifa_id"].apply(get_face_url)
-
     return df
-
 
 def initialize_app():
     global player_data_base, player_data_baller, next_match_data
     player_data_base = _load_fc26_data(DATA_FILENAME_BASE)
     player_data_baller = _load_baller_league_data(DATA_FILENAME_BALLER)
     next_match_data = _load_next_match_data(DATA_FILENAME_NEXT_MATCH)
-
-    # Ensure admin exists in signups.csv
+    # ensure admin exists
     admin_email = "info@momentumscout.com"
     is_valid, _, _ = check_login_status(admin_email)
     if not is_valid:
@@ -649,7 +601,6 @@ def initialize_app():
             "plan": "yearly",
         })
 
-
 # ----------------------------------------------------
 # ROUTES
 # ----------------------------------------------------
@@ -657,15 +608,12 @@ def initialize_app():
 def health():
     return jsonify({"status": "online"}), 200
 
-
 @app.route("/api/verify_login", methods=["POST", "OPTIONS"])
 def api_verify_login():
     data = request.json or {}
     email = (data.get("email") or "").strip().lower()
     code = str(data.get("code") or "").strip()
     portal = (data.get("portal") or "").strip()
-
-    # ✅ OWNER BYPASS: you can access any portal without a code
     if is_owner(email):
         return jsonify({
             "success": True,
@@ -677,34 +625,27 @@ def api_verify_login():
                 "export_csv": True
             }
         }), 200
-
-
-    # 1) static portal codes
+    # static portal code
     if ACCESS_CODES.get(portal) == code:
         is_valid, msg, entitlements = check_login_status(email)
         if not is_valid:
             return jsonify({"success": False, "message": msg}), 403
         return jsonify({"success": True, "message": msg, "entitlements": entitlements}), 200
-
-    # 2) per-user access_code in signups.csv
+    # per-user access_code in signups.csv
     fp = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_SIGNUPS)
     if not os.path.exists(fp):
         return jsonify({"success": False, "message": "No signups found."}), 403
-
     try:
         df = pd.read_csv(fp)
         match = df[
             (df["email"].astype(str).str.strip().str.lower() == email)
             & (df["access_code"].astype(str).str.strip() == code)
         ]
-
         if match.empty:
             return jsonify({"success": False, "message": "Invalid access code or email."}), 403
-
         user = match.iloc[-1]
         tier = user.get("tier", "Tier 3")
         plan = user.get("plan", "monthly")
-
         config = ENTITLEMENTS_MAP.get(tier, ENTITLEMENTS_MAP["Tier 3"])
         analyst_access = False
         raw_access = config.get("analyst_ai", False)
@@ -712,19 +653,16 @@ def api_verify_login():
             analyst_access = True
         elif raw_access == "yearly_only" and plan == "yearly":
             analyst_access = True
-
         entitlements = {
             "tier": tier,
             "plan": plan,
             "analyst_ai": analyst_access,
             "export_csv": bool(config.get("export_csv", False)),
         }
-
         return jsonify({"success": True, "message": "Login Verified", "entitlements": entitlements}), 200
-
     except Exception as e:
+        traceback.print_exc()
         return jsonify({"success": False, "message": f"System Error: {str(e)}"}), 500
-
 
 def safe_send_email(msg: Message):
     try:
@@ -732,34 +670,27 @@ def safe_send_email(msg: Message):
         return True
     except Exception as e:
         print("❌ EMAIL SEND FAILED:", repr(e), flush=True)
+        traceback.print_exc()
         return False
-    
+
 @app.route("/api/submit_demo", methods=["POST", "OPTIONS"])
 def api_submit_demo():
     if request.method == "OPTIONS":
         return ("", 204)
-
-
     try:
         data = request.json or {}
         full_name = (data.get("fullName") or "User").strip()
         user_email = (data.get("email") or "").strip().lower()
         org = (data.get("organization") or "N/A").strip()
         role = (data.get("role") or "N/A").strip()
-
         if not user_email:
             return jsonify({"success": False, "message": "Email required."}), 400
-
-        # generate unique access code
         access_code = make_access_code(8)
         data["access_code"] = access_code
-
-        # 1) save locally
         saved = save_signup(data)
         if not saved:
-            print("⚠️ Warning: save_signup returned False")
-
-        # 2) push to Google Sheet (Apps Script) - best effort
+            print("⚠️ Warning: save_signup returned False", flush=True)
+        # push to Google Sheet (Apps Script) - best effort
         gs_url = (os.environ.get("GOOGLE_SCRIPT_URL") or "").strip()
         if gs_url:
             payload = {
@@ -771,19 +702,19 @@ def api_submit_demo():
                 "plan": data.get("plan", "monthly"),
                 "access_code": access_code,
             }
-        try:
+            try:
                 r = requests.post(gs_url, json=payload, timeout=4)
-                print("✅ Google Sheet POST status:", r.status_code)
-                print("✅ Google Sheet response:", r.text[:300])
-        except Exception as e:
-                print("⚠️ Google Script POST failed:", repr(e))
-            # 3) EMAIL — send in background so endpoint never hangs
+                print("✅ Google Sheet POST status:", r.status_code, flush=True)
+                print("✅ Google Sheet response:", (r.text or "")[:300], flush=True)
+            except Exception as e:
+                print("⚠️ Google Script POST failed:", repr(e), flush=True)
+                traceback.print_exc()
+        # send emails in background
         try:
             internal_recipient = os.environ.get(
                 "INTERNAL_ALERT_EMAIL",
                 "info@momentumscout.com"
             )
-
             internal_msg = Message(
                 subject=f"🔥 New Demo Request: {org} - {full_name}",
                 recipients=[internal_recipient],
@@ -796,7 +727,6 @@ def api_submit_demo():
                     f"Access Code: {access_code}\n"
                 ),
             )
-
             customer_msg = Message(
                 subject="Welcome to MomentumScout – Demo Request Received",
                 recipients=[user_email],
@@ -809,30 +739,23 @@ def api_submit_demo():
                     "MomentumScout Team\n"
                 ),
             )
-
             threading.Thread(
                 target=_send_emails_bg,
                 args=(app, internal_msg, customer_msg),
                 daemon=True,
             ).start()
-
         except Exception as e:
             print("❌ Could not start email thread:", repr(e), flush=True)
-
-
-        # Always succeed if saved/sheet worked (email is optional)
+            traceback.print_exc()
         return jsonify({
             "success": True,
             "message": "Demo request submitted successfully.",
-            "access_code": access_code  # optional: remove if you don't want returning it
+            "access_code": access_code
         }), 200
-
     except Exception as e:
-        print("Demo Request Error:", repr(e))
+        print("Demo Request Error:", repr(e), flush=True)
+        traceback.print_exc()
         return jsonify({"success": False, "message": "Submission error. Please try again."}), 500
-
-
-
 
 @app.route("/api/find_players", methods=["POST", "OPTIONS"])
 def api_find_players():
@@ -841,7 +764,6 @@ def api_find_players():
         df = player_data_baller if data.get("data_source") == "baller" else player_data_base
         if df is None:
             return jsonify({"players": []}), 200
-
         df = df.copy()
         filters = data.get("filters", {})
         for key, rng in filters.items():
@@ -849,22 +771,22 @@ def api_find_players():
             if "value" in col:
                 col = "value_eur"
             if col in df.columns and isinstance(rng, list) and len(rng) >= 2:
-                df = df[(df[col] >= float(rng[0])) & (df[col] <= float(rng[1]))]
-
+                try:
+                    df = df[(df[col] >= float(rng[0])) & (df[col] <= float(rng[1]))]
+                except Exception:
+                    # ignore bad filters
+                    continue
         is_baller = (data.get("data_source") == "baller")
         df["momentum_score"] = df.apply(
             lambda r: compute_score_for_player(r, data.get("position", "ALL"), data.get("weights"), is_baller),
             axis=1,
         )
-
         out = []
         for _, row in df.sort_values("momentum_score", ascending=False).head(20).iterrows():
             p_dict = row.to_dict()
             p_dict = {k: (0 if pd.isna(v) else v) for k, v in p_dict.items()}
-
             tp = generate_training_plan(row, row.get("club_position", "CM"), is_baller)
             hm = generate_heatmap_data(row, row.get("club_position", "CM"))
-
             out.append({
                 "short_name": p_dict.get("short_name"),
                 "club_position": p_dict.get("club_position"),
@@ -876,11 +798,10 @@ def api_find_players():
                 "full_attributes": p_dict,
                 "projections": project_player(row),
             })
-
         return jsonify({"players": out}), 200
     except Exception as e:
+        traceback.print_exc()
         return jsonify({"players": [], "error": str(e)}), 500
-
 
 @app.route("/api/search_player", methods=["POST", "OPTIONS"])
 def api_search_player():
@@ -891,11 +812,9 @@ def api_search_player():
         df = player_data_baller if is_baller else player_data_base
         if df is None or df.empty or not query:
             return jsonify([]), 200
-
         mask = df["short_name"].astype(str).str.lower().str.contains(query)
         if "name" in df.columns:
             mask |= df["name"].astype(str).str.lower().str.contains(query)
-
         results = df[mask].head(10)
         out = []
         for _, row in results.iterrows():
@@ -906,7 +825,6 @@ def api_search_player():
             projections = project_player(row, years_to_project(age))
             tp = generate_training_plan(row, row.get("club_position", "CM"), is_baller)
             hm = generate_heatmap_data(row, row.get("club_position", "CM"))
-
             out.append({
                 "short_name": p_dict.get("short_name"),
                 "club_position": p_dict.get("club_position"),
@@ -917,9 +835,9 @@ def api_search_player():
                 "value_eur": safe_int(p_dict.get("value_eur")),
                 "full_attributes": p_dict,
             })
-
         return jsonify(out), 200
     except Exception:
+        traceback.print_exc()
         return jsonify([]), 500
 
 @app.route("/api/squad_gap_analysis", methods=["POST", "OPTIONS"])
@@ -928,36 +846,24 @@ def api_squad_gap_analysis():
         payload = request.json or {}
         csv_text = payload.get("csv_text", "")
         focus_position = str(payload.get("position", "ALL")).upper().strip()
-
         if not csv_text:
             return jsonify({"success": False, "message": "Missing csv_text"}), 400
-
         squad = pd.read_csv(StringIO(csv_text))
         squad.columns = [clean_column_name(c) for c in squad.columns]
         squad = squad.fillna(0)
-
         pos_col = _infer_position_col(squad)
         if not pos_col:
-            # allow CSVs that are already separated per position (rare) but still handle gracefully
             squad["club_position"] = "CM"
             pos_col = "club_position"
-
         squad[pos_col] = _normalize_positions(squad[pos_col])
         if pos_col != "club_position":
             squad["club_position"] = squad[pos_col]
-
-        # positions in uploaded squad
         squad_positions = sorted(list(set(squad["club_position"].astype(str).tolist())))
-
-        # benchmark from your DB
         if player_data_base is None or player_data_base.empty:
             return jsonify({"success": False, "message": "player_data_base not loaded"}), 500
-
         db = player_data_base.copy()
         if "club_position" not in db.columns:
             return jsonify({"success": False, "message": "Database missing club_position"}), 500
-
-        # helper: compute "team score" per position based on POSITION_WEIGHTS
         def pos_score(df_pos: pd.DataFrame, position: str) -> float:
             weights = POSITION_WEIGHTS.get(position, {})
             if not weights or df_pos.empty:
@@ -968,29 +874,20 @@ def api_squad_gap_analysis():
                 if attr in df_pos.columns:
                     score += (df_pos[attr].astype(float).mean() / 100.0) * (w / total_w)
             return round(score * 100, 2)
-
-        # build analysis blocks
         positions_to_analyze = squad_positions if focus_position == "ALL" else [focus_position]
         report_blocks = []
-
         for pos in positions_to_analyze:
             squad_pos = squad[squad["club_position"] == pos]
             if squad_pos.empty:
                 continue
-
             weights = POSITION_WEIGHTS.get(pos, {})
             if not weights:
                 continue
-
-            # benchmark: take top quartile mean by score (acts like "elite" baseline)
             db_pos = db[db["club_position"] == pos].copy()
             if db_pos.empty:
                 continue
-
             db_pos["momentum_score"] = db_pos.apply(lambda r: compute_score_for_player(r, pos, None, False), axis=1)
             elite = db_pos.sort_values("momentum_score", ascending=False).head(max(20, int(len(db_pos) * 0.1)))
-
-            # compute per-attribute gaps
             gaps = []
             for attr in weights.keys():
                 if attr in squad_pos.columns and attr in elite.columns:
@@ -998,30 +895,22 @@ def api_squad_gap_analysis():
                     elite_avg = float(pd.to_numeric(elite[attr], errors="coerce").fillna(0).mean())
                     gap = elite_avg - squad_avg
                     gaps.append((attr, round(squad_avg, 1), round(elite_avg, 1), round(gap, 1)))
-
             gaps.sort(key=lambda x: x[3], reverse=True)
             weakest = [g[0] for g in gaps[:3] if g[3] > 0]
-
             squad_score = pos_score(squad_pos, pos)
             elite_score = pos_score(elite, pos)
-
             archetype = _archetype_from_gaps(pos, weakest)
             why_lines = []
             for a in weakest:
                 drill = DRILL_DATABASE.get(a, "Targeted technical work + match scenario reps.")
                 why_lines.append(f"- **{a.replace('_',' ').title()}** is below benchmark → {drill}")
-
-            # recommended targets from DB
-            # pick top candidates that beat the squad average on the weakest attributes
             candidates = db_pos.copy()
             for a in weakest:
                 if a in candidates.columns:
                     threshold = float(pd.to_numeric(squad_pos[a], errors="coerce").fillna(0).mean())
                     candidates = candidates[pd.to_numeric(candidates[a], errors="coerce").fillna(0) >= threshold]
-
             candidates["momentum_score"] = candidates.apply(lambda r: compute_score_for_player(r, pos, None, False), axis=1)
             top_targets = candidates.sort_values("momentum_score", ascending=False).head(8)
-
             targets_out = []
             for _, r in top_targets.iterrows():
                 rd = r.to_dict()
@@ -1033,29 +922,25 @@ def api_squad_gap_analysis():
                     "player_face_url": rd.get("player_face_url", ""),
                     "full_attributes": {k: (0 if pd.isna(v) else v) for k, v in rd.items()},
                 })
-
             report_blocks.append({
                 "position": pos,
                 "squad_score": squad_score,
                 "elite_score": elite_score,
                 "archetype": archetype,
-                "gaps": gaps[:6],          # top 6 gaps table
-                "weakest": weakest,        # top 3 gaps
-                "reasoning": why_lines,    # “AI” explanation bullets
+                "gaps": gaps[:6],
+                "weakest": weakest,
+                "reasoning": why_lines,
                 "targets": targets_out,
             })
-
         return jsonify({
             "success": True,
             "positions_found": squad_positions,
             "report": report_blocks,
         }), 200
-
     except Exception as e:
         print("Squad gap analysis error:", repr(e), flush=True)
         traceback.print_exc()
         return jsonify({"success": False, "message": str(e)}), 500
-
 
 @app.route("/api/budget_target", methods=["POST", "OPTIONS"])
 def api_budget_target():
@@ -1063,38 +948,56 @@ def api_budget_target():
         payload = request.json or {}
         max_wage = safe_int(payload.get("max_wage"), 500000)
         contract_year = safe_int(payload.get("contract_year"), 2026)
-
+        if player_data_base is None:
+            return jsonify({"targets": [], "error": "Database not loaded"}), 500
         df = player_data_base.copy()
-        wage_col = "wage_eur" if "wage_eur" in df.columns else "wage"
-        year_col = "club_contract_valid_until_year" if "club_contract_valid_until_year" in df.columns else "contract_valid_until"
-
+        # find wage column safely
+        wage_col = None
+        for c in ("wage_eur", "wage", "wage_yearly", "wage_weekly"):
+            if c in df.columns:
+                wage_col = c
+                break
+        if wage_col is None:
+            return jsonify({"targets": [], "error": "Wage column not found in DB"}), 500
+        # year column
+        year_col = None
+        for c in ("club_contract_valid_until_year", "contract_valid_until", "contract_end"):
+            if c in df.columns:
+                year_col = c
+                break
         if year_col in df.columns:
-            df[year_col] = pd.to_numeric(df[year_col], errors="coerce").fillna(0).astype(int)
-
-        df = df[(df[wage_col] * 52) <= max_wage]
-        if year_col in df.columns:
+            try:
+                df[year_col] = pd.to_numeric(df[year_col], errors="coerce").fillna(0).astype(int)
+            except Exception:
+                pass
+        # normalize wage to yearly if wage is weekly
+        def wage_to_yearly(row):
+            val = safe_float(row.get(wage_col, 0))
+            # assume weekly if small: but preserve if already yearly
+            if wage_col in ("wage", "wage_weekly"):
+                return val * 52
+            return val
+        df["wage_yearly_calc"] = df.apply(wage_to_yearly, axis=1)
+        df = df[(df["wage_yearly_calc"] <= max_wage)]
+        if year_col:
             df = df[df[year_col] <= contract_year]
-
         targets = df.sort_values(by="overall", ascending=False).head(20)
-
         out = []
         for _, row in targets.iterrows():
             out.append({
-                "short_name": row["short_name"],
-                "club_position": row["club_position"],
-                "overall": row["overall"],
+                "short_name": row.get("short_name", "Unknown"),
+                "club_position": row.get("club_position", "N/A"),
+                "overall": int(row.get("overall", 0)) if not pd.isna(row.get("overall", None)) else 0,
                 "value_eur": row.get("value_eur", 0),
-                "wage_yearly": row[wage_col] * 52,
-                "contract_end": int(row.get(year_col, 0)),
+                "wage_yearly": int(row.get("wage_yearly_calc", 0)),
+                "contract_end": int(row.get(year_col, 0)) if year_col else 0,
                 "full_stats": row.to_dict(),
             })
-
         return jsonify({"targets": out}), 200
-
     except Exception as e:
         print("Budget target error:", repr(e), flush=True)
+        traceback.print_exc()
         return jsonify({"targets": [], "error": str(e)}), 500
-
 
 @app.route("/api/next_match", methods=["GET", "OPTIONS"])
 def api_next_match():
@@ -1121,7 +1024,6 @@ def api_next_match():
                 next_match_data.get("drill_2", "Tactical Review"),
             ],
         }), 200
-
     return jsonify({
         "opponent": "Rebels FC (Mock)",
         "formation": "4-3-3",
@@ -1132,11 +1034,9 @@ def api_next_match():
         "prep_drills": ["Low block"],
     }), 200
 
-
 @app.route("/assets/<path:filename>")
 def serve_assets(filename):
     return send_from_directory(os.path.join(app.root_path, "public/assets"), filename)
-
 
 # ----------------------------------------------------
 # STARTUP
@@ -1147,4 +1047,5 @@ if __name__ == "__main__":
     print("🚀 Backend starting...", flush=True)
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
+
 
