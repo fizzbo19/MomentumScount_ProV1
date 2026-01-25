@@ -141,7 +141,7 @@ elif os.path.exists(os.path.join(BASE_DIR, "../data")):
 else:
     DEFAULT_DATA_PATH = os.path.join(os.getcwd(), "data")
 
-DATA_FOLDER_PATH = os.environ.get("DATA_FOLDER_PATH", DEFAULT_DATA_PATH)
+DATA_FOLDER_PATH = (os.environ.get("DATA_FOLDER_PATH") or DEFAULT_DATA_PATH).strip()
 os.makedirs(DATA_FOLDER_PATH, exist_ok=True)
 
 DATA_FILENAME_BASE = os.environ.get("DATA_FILENAME_BASE", "FC26_MomentumScout.csv")
