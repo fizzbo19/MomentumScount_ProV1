@@ -1125,28 +1125,21 @@ def api_next_match():
 def serve_assets(filename):
     return send_from_directory(os.path.join(app.root_path, "public/assets"), filename)
 
-@app.route("/api/debug", methods=["GET"])
-def api_debug():
-    try:
-        base_fp = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_BASE)
-        return jsonify({
-            "data_folder": DATA_FOLDER_PATH,
-            "base_file": DATA_FILENAME_BASE,
-            "base_file_exists": os.path.exists(base_fp),
-            "base_rows": 0 if player_data_base is None else int(len(player_data_base)),
-            "base_cols_sample": [] if player_data_base is None else list(player_data_base.columns)[:25],
-        }), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
+
+# ----------------------------------------------------
+# STARTUP
+# ----------------------------------------------------
 # ----------------------------------------------------
 # STARTUP
 # ----------------------------------------------------
 initialize_app()
 
 if __name__ == "__main__":
-    print("🚀 Backend starting...", flush=True)
+    print("🚀 Backend starting locally...", flush=True)
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
+
+
 
 
