@@ -626,19 +626,42 @@ def health():
     return jsonify({"status": "online"}), 200
 
 
-@app.route("/api/debug", methods=["GET"])
-def api_debug():
-    """Quick check: is the DB loaded on Render + what columns exist?"""
-    if player_data_base is None:
-        return jsonify({"base_loaded": False, "reason": "player_data_base is None"}), 200
+@app.route("/api/debug_fs", methods=["GET"])
+def api_debug_fs():
+    base = os.getcwd()
+
+    candidates = [
+        base,
+        os.path.dirname(os.path.abspath(__file__)),
+        os.path.join(base, "MomentumAIbackend"),
+        os.path.join(base, "MomentumAIbackend", "data"),
+        os.path.join(base, "MomentumAIBackend"),
+        os.path.join(base, "MomentumAIBackend", "data"),
+        DATA_FOLDER_PATH,
+    ]
+
+    probes = []
+    for p in candidates:
+        p = (p or "").strip()
+        item = {"path": p, "exists": os.path.exists(p)}
+        if os.path.isdir(p):
+            try:
+                item["ls"] = sorted(os.listdir(p))[:100]
+            except Exception as e:
+                item["ls_error"] = repr(e)
+        probes.append(item)
+
+    resolved = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_BASE)
     return jsonify({
-        "base_loaded": True,
-        "base_rows": int(len(player_data_base)),
-        "base_cols_sample": list(player_data_base.columns)[:60],
+        "cwd": base,
+        "base_dir": os.path.dirname(os.path.abspath(__file__)),
         "data_folder_path": DATA_FOLDER_PATH,
         "base_filename": DATA_FILENAME_BASE,
-        "file_exists": os.path.exists(os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_BASE)),
+        "resolved_csv_path": resolved,
+        "resolved_exists": os.path.exists(resolved),
+        "probes": probes,
     }), 200
+
 
 @app.route("/api/sample_player", methods=["GET"])
 def api_sample_player():
