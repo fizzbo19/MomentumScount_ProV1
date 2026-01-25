@@ -665,7 +665,7 @@ def api_verify_login():
     code = str(data.get("code") or "").strip()
     portal = (data.get("portal") or "").strip()
 
-        # ✅ OWNER BYPASS: you can access any portal without a code
+    # ✅ OWNER BYPASS: you can access any portal without a code
     if is_owner(email):
         return jsonify({
             "success": True,
@@ -677,6 +677,7 @@ def api_verify_login():
                 "export_csv": True
             }
         }), 200
+
 
     # 1) static portal codes
     if ACCESS_CODES.get(portal) == code:
@@ -770,13 +771,13 @@ def api_submit_demo():
                 "plan": data.get("plan", "monthly"),
                 "access_code": access_code,
             }
-            try:
+        try:
                 r = requests.post(gs_url, json=payload, timeout=4)
                 print("✅ Google Sheet POST status:", r.status_code)
                 print("✅ Google Sheet response:", r.text[:300])
-            except Exception as e:
+        except Exception as e:
                 print("⚠️ Google Script POST failed:", repr(e))
-                    # 3) EMAIL — send in background so endpoint never hangs
+            # 3) EMAIL — send in background so endpoint never hangs
         try:
             internal_recipient = os.environ.get(
                 "INTERNAL_ALERT_EMAIL",

@@ -979,18 +979,23 @@ async function handleSquadAnalysis() {
 }
 
 
-      async function handleSearchPlayers() {
-        const q = playerNameSearch.value.trim();
-        if (!q) return;
+async function handleSearchPlayers() {
+  const q = playerNameSearch.value.trim();
+  if (!q) return;
 
-        playerSearchResults.innerHTML = '<div class="spinner"></div>';
-        safePost("/search_player", { player_name: q }).then((data) => {
-          playerSearchResults.innerHTML = "";
-          data?.forEach((pl) =>
-            playerSearchResults.appendChild(renderPlayerCard(pl))
-          );
-        });
-      }
+  playerSearchResults.innerHTML = '<div class="spinner"></div>';
+
+  try {
+    const data = await safePost("/search_player", { player_name: q });
+    playerSearchResults.innerHTML = "";
+    (data || []).forEach((pl) => playerSearchResults.appendChild(renderPlayerCard(pl)));
+  } catch (err) {
+    console.error(err);
+    playerSearchResults.innerHTML =
+      '<p class="text-red-500 text-center mt-4">Error connecting to scouting server.</p>';
+  }
+}
+
 
       async function handleBudgetTargeting() {
   const list = document.getElementById("targetResults");
@@ -1021,7 +1026,7 @@ async function handleSquadAnalysis() {
         (p, i) => `
         <div
           class="flex justify-between items-center p-3 bg-gray-800 rounded border border-gray-700 mb-2 cursor-pointer hover:border-green-500"
-          onclick="loadPlayerDetails(currentTargets[${i}]); switchTab('analytics');"
+          onclick="loadPlayerDetails(currentTargets[${i}]);"
         >
           <div>
             <div class="text-sm font-bold text-green-400">${p.short_name}</div>
@@ -1042,22 +1047,27 @@ async function handleSquadAnalysis() {
 }
 
 
-      function renderPlayerCard(player) {
-        const card = document.createElement("div");
-        card.className =
-          "bg-gray-800 p-4 rounded-xl border border-gray-700 hover:scale-105 transition-transform cursor-pointer";
-        card.innerHTML = `
-          <div class="flex items-center gap-3">
-            <img src="${player.player_face_url}" class="w-16 h-16 rounded-full border-2 border-green-500 object-cover">
-            <div class="flex-1">
-              <div class="font-bold text-green-300">${player.short_name}</div>
-              <div class="text-xs text-gray-400">${player.club_position} • OVR ${player.overall}</div>
-            </div>
-          </div>
-        `;
-        card.onclick = () => loadPlayerDetails(player);
-        return card;
-        }
+function renderPlayerCard(player) {
+  const attrs = player.full_attributes || {};
+  const overall = player.overall ?? attrs.overall ?? "";
+  const face = player.player_face_url ?? attrs.player_face_url ?? "";
+
+  const card = document.createElement("div");
+  card.className =
+    "bg-gray-800 p-4 rounded-xl border border-gray-700 hover:scale-105 transition-transform cursor-pointer";
+  card.innerHTML = `
+    <div class="flex items-center gap-3">
+      <img src="${face}" class="w-16 h-16 rounded-full border-2 border-green-500 object-cover" onerror="this.style.display='none'">
+      <div class="flex-1">
+        <div class="font-bold text-green-300">${player.short_name}</div>
+        <div class="text-xs text-gray-400">${player.club_position} ${overall ? `• OVR ${overall}` : ""}</div>
+      </div>
+    </div>
+  `;
+  card.onclick = () => loadPlayerDetails(player);
+  return card;
+}
+
 
         function pickStat(attrs, keys, fallback = 50) {
   for (const k of keys) {
@@ -1402,6 +1412,8 @@ if (!player) return;
     console.error("❌ Bootstrap failed:", e);
   }
 });
+
+
 
     </script>
     
