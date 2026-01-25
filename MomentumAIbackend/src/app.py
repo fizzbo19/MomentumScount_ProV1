@@ -1012,79 +1012,71 @@ def api_squad_gap_analysis():
 
 @app.route("/api/budget_target", methods=["POST", "OPTIONS"])
 def api_budget_target():
-    """
-    Stable version:
-    - never 500s for common "db missing" issues
-    - tries multiple column names for wage/contract
-    """
     try:
         payload = request.json or {}
-        max_wage = safe_int(payload.get("max_wage"), 500000)
+        max_wage = safe_int(payload.get("max_wage"), 500000)          # annual wage cap
         contract_year = safe_int(payload.get("contract_year"), 2026)
 
         if player_data_base is None or player_data_base.empty:
-            return jsonify({
-                "targets": [],
-                "error": "Base database not loaded on server. Check Render deploy includes FC26_MomentumScout.csv"
-            }), 200
+            return jsonify({"targets": [], "error": "Database not loaded"}), 500
 
         df = player_data_base.copy()
 
-        # Wage column candidates
+        # wage column (your CSV has wage_eur, which is weekly in most FIFA datasets)
         wage_col = None
-        for c in ("wage_eur", "wage", "wage_weekly", "wage_weekly_eur", "weekly_wage"):
+        for c in ("wage_eur", "wage", "wage_weekly", "wage_yearly"):
             if c in df.columns:
                 wage_col = c
                 break
+        if not wage_col:
+            return jsonify({"targets": [], "error": "Wage column not found in DB"}), 500
 
-        if wage_col is None:
-            return jsonify({"targets": [], "error": "No wage column found in dataset."}), 200
-
-        # Contract year column candidates
+        # contract year column (your CSV has club_contract_valid_until_year)
         year_col = None
-        for c in ("club_contract_valid_until_year", "contract_valid_until", "contract_end_year", "contract_end"):
+        for c in ("club_contract_valid_until_year", "contract_valid_until", "contract_end"):
             if c in df.columns:
                 year_col = c
                 break
 
-        # Normalize columns
-        df[wage_col] = pd.to_numeric(df[wage_col], errors="coerce").fillna(0)
-
-        if year_col:
+        if year_col and year_col in df.columns:
             df[year_col] = pd.to_numeric(df[year_col], errors="coerce").fillna(0).astype(int)
 
-        # Wage to yearly (assume weekly if column name hints weekly OR values are small)
-        def wage_to_yearly(val: float) -> float:
-            if "weekly" in wage_col:
-                return val * 52
-            # heuristic: if most wages are under 50k, likely weekly
-            return val * 52 if val <= 50000 else val
-
-        df["wage_yearly_calc"] = df[wage_col].apply(lambda x: wage_to_yearly(float(x)))
+        # Normalize wage to yearly
+        # If wage_eur is weekly, yearly = *52. If already yearly, keep as-is.
+        if wage_col in ("wage_eur", "wage", "wage_weekly"):
+            df["wage_yearly_calc"] = pd.to_numeric(df[wage_col], errors="coerce").fillna(0) * 52
+        else:
+            df["wage_yearly_calc"] = pd.to_numeric(df[wage_col], errors="coerce").fillna(0)
 
         # Apply filters
         df = df[df["wage_yearly_calc"] <= max_wage]
+
         if year_col:
             df = df[df[year_col] <= contract_year]
 
-        if "overall" in df.columns:
-            df = df.sort_values(by="overall", ascending=False)
-
-        targets = df.head(20)
+        # Sort and return top 20
+        df["overall"] = pd.to_numeric(df.get("overall", 0), errors="coerce").fillna(0).astype(int)
+        targets = df.sort_values(by="overall", ascending=False).head(20)
 
         out = []
         for _, row in targets.iterrows():
             out.append({
-                "short_name": row.get("short_name", row.get("name", "Unknown")),
+                "short_name": row.get("short_name", "Unknown"),
                 "club_position": row.get("club_position", "N/A"),
-                "overall": safe_int(row.get("overall", 0)),
+                "overall": int(row.get("overall", 0)),
                 "value_eur": safe_int(row.get("value_eur", 0)),
-                "wage_yearly": int(row.get("wage_yearly_calc", 0)),
+                "wage_yearly": safe_int(row.get("wage_yearly_calc", 0)),
                 "contract_end": int(row.get(year_col, 0)) if year_col else 0,
                 "full_stats": row.to_dict(),
             })
 
         return jsonify({"targets": out}), 200
+
+    except Exception as e:
+        print("Budget target error:", repr(e), flush=True)
+        traceback.print_exc()
+        return jsonify({"targets": [], "error": str(e)}), 500
+
 
     except Exception as e:
         print("Budget target error:", repr(e), flush=True)
@@ -1133,6 +1125,19 @@ def api_next_match():
 def serve_assets(filename):
     return send_from_directory(os.path.join(app.root_path, "public/assets"), filename)
 
+@app.route("/api/debug", methods=["GET"])
+def api_debug():
+    try:
+        base_fp = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_BASE)
+        return jsonify({
+            "data_folder": DATA_FOLDER_PATH,
+            "base_file": DATA_FILENAME_BASE,
+            "base_file_exists": os.path.exists(base_fp),
+            "base_rows": 0 if player_data_base is None else int(len(player_data_base)),
+            "base_cols_sample": [] if player_data_base is None else list(player_data_base.columns)[:25],
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ----------------------------------------------------
 # STARTUP
