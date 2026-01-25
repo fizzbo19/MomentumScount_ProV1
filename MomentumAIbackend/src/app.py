@@ -133,26 +133,28 @@ def api_ping():
 # ----------------------------------------------------
 # CONSTANTS / CONFIG
 # ----------------------------------------------------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # MomentumAIbackend/src
+# 1. Get the directory where app.py actually lives
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Default: ../data relative to src/
-DEFAULT_DATA_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "data"))
+# 2. Try several common locations for the 'data' folder relative to app.py
+potential_paths = [
+    os.path.join(BASE_DIR, 'data'),          # data/ is inside src/
+    os.path.join(BASE_DIR, '..', 'data'),    # data/ is next to src/
+    os.path.join(os.getcwd(), 'data'),       # data/ is in the current working dir
+    os.path.join(os.getcwd(), '..', 'data')  # data/ is one level up from working dir
+]
 
-raw = (os.environ.get("DATA_FOLDER_PATH") or DEFAULT_DATA_PATH).strip()
+DATA_FOLDER_PATH = None
+for p in potential_paths:
+    if os.path.exists(p):
+        DATA_FOLDER_PATH = os.path.abspath(p)
+        print(f"✅ FOUND DATA FOLDER AT: {DATA_FOLDER_PATH}")
+        break
 
-# Allow relative paths like "data" or "../data"
-if not os.path.isabs(raw):
-    raw = os.path.abspath(os.path.join(BASE_DIR, raw))
-
-DATA_FOLDER_PATH = raw
-
-# Ensure directory exists (required for CSV writes)
-try:
-    os.makedirs(DATA_FOLDER_PATH, exist_ok=True)
-except Exception as e:
-    print(f"❌ Failed to create DATA_FOLDER_PATH={DATA_FOLDER_PATH}: {e}", flush=True)
-
-print("📦 DATA_FOLDER_PATH =", DATA_FOLDER_PATH, flush=True)
+if not DATA_FOLDER_PATH:
+    # Fallback to current directory if nothing found
+    DATA_FOLDER_PATH = os.path.join(os.getcwd(), 'data')
+    print(f"⚠️ WARNING: Data folder not found, defaulting to: {DATA_FOLDER_PATH}")
 
 
 
