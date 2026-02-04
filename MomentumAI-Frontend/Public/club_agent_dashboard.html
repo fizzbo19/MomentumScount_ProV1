@@ -1179,7 +1179,7 @@
           '<div class="flex justify-center py-10"><div class="spinner"></div></div>';
 
         try {
-          const data = await safePost("/budget_target", {
+          const data = await safePost("/api/budget_target", {
             max_wage: document.getElementById("maxWage").value,
             contract_year: document.getElementById("contractYear").value,
           });

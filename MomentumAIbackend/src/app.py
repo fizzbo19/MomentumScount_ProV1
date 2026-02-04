@@ -1079,7 +1079,7 @@ def api_budget_target():
         contract_year = safe_int(payload.get("contract_year"), 2026)
 
         if player_data_base is None or player_data_base.empty:
-            return jsonify({"targets": [], "error": "Database not loaded"}), 500
+            return jsonify({"targets": [], "error": "Database not loaded"}), 200
 
         df = player_data_base.copy()
 
@@ -1138,11 +1138,6 @@ def api_budget_target():
         traceback.print_exc()
         return jsonify({"targets": [], "error": str(e)}), 500
 
-
-    except Exception as e:
-        print("Budget target error:", repr(e), flush=True)
-        traceback.print_exc()
-        return jsonify({"targets": [], "error": str(e)}), 500
 
 
 @app.route("/api/next_match", methods=["GET", "OPTIONS"])
