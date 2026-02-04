@@ -949,186 +949,77 @@ def api_search_player():
         return jsonify([]), 500
 
 
-@app.route("/api/squad_gap_analysis", methods=["POST", "OPTIONS"])
-def api_squad_gap_analysis():
-    try:
-        payload = request.json or {}
-        csv_text = payload.get("csv_text", "")
-        focus_position = str(payload.get("position", "ALL")).upper().strip()
-
-        if not csv_text:
-            return jsonify({"success": False, "message": "Missing csv_text"}), 400
-
-        squad = pd.read_csv(StringIO(csv_text))
-        squad.columns = [clean_column_name(c) for c in squad.columns]
-        squad = squad.fillna(0)
-
-        pos_col = _infer_position_col(squad)
-        if not pos_col:
-            squad["club_position"] = "CM"
-            pos_col = "club_position"
-
-        squad[pos_col] = _normalize_positions(squad[pos_col])
-        if pos_col != "club_position":
-            squad["club_position"] = squad[pos_col]
-
-        squad_positions = sorted(list(set(squad["club_position"].astype(str).tolist())))
-
-        if player_data_base is None or player_data_base.empty:
-            return jsonify({"success": False, "message": "player_data_base not loaded on server"}), 200
-
-        db = player_data_base.copy()
-        if "club_position" not in db.columns:
-            return jsonify({"success": False, "message": "Database missing club_position"}), 200
-
-        def pos_score(df_pos: pd.DataFrame, position: str) -> float:
-            weights = POSITION_WEIGHTS.get(position, {})
-            if not weights or df_pos.empty:
-                return 0.0
-            total_w = sum(weights.values()) or 1
-            score = 0.0
-            for attr, w in weights.items():
-                if attr in df_pos.columns:
-                    score += (df_pos[attr].astype(float).mean() / 100.0) * (w / total_w)
-            return round(score * 100, 2)
-
-        positions_to_analyze = squad_positions if focus_position == "ALL" else [focus_position]
-        report_blocks = []
-
-        for pos in positions_to_analyze:
-            squad_pos = squad[squad["club_position"] == pos]
-            if squad_pos.empty:
-                continue
-
-            weights = POSITION_WEIGHTS.get(pos, {})
-            if not weights:
-                continue
-
-            db_pos = db[db["club_position"] == pos].copy()
-            if db_pos.empty:
-                continue
-
-            db_pos["momentum_score"] = db_pos.apply(lambda r: compute_score_for_player(r, pos, None, False), axis=1)
-            elite = db_pos.sort_values("momentum_score", ascending=False).head(max(20, int(len(db_pos) * 0.1)))
-
-            gaps = []
-            for attr in weights.keys():
-                if attr in squad_pos.columns and attr in elite.columns:
-                    squad_avg = float(pd.to_numeric(squad_pos[attr], errors="coerce").fillna(0).mean())
-                    elite_avg = float(pd.to_numeric(elite[attr], errors="coerce").fillna(0).mean())
-                    gap = elite_avg - squad_avg
-                    gaps.append((attr, round(squad_avg, 1), round(elite_avg, 1), round(gap, 1)))
-
-            gaps.sort(key=lambda x: x[3], reverse=True)
-            weakest = [g[0] for g in gaps[:3] if g[3] > 0]
-
-            squad_score = pos_score(squad_pos, pos)
-            elite_score = pos_score(elite, pos)
-
-            archetype = _archetype_from_gaps(pos, weakest)
-            why_lines = []
-            for a in weakest:
-                drill = DRILL_DATABASE.get(a, "Targeted technical work + match scenario reps.")
-                why_lines.append(f"- **{a.replace('_',' ').title()}** is below benchmark → {drill}")
-
-            candidates = db_pos.copy()
-            for a in weakest:
-                if a in candidates.columns:
-                    threshold = float(pd.to_numeric(squad_pos[a], errors="coerce").fillna(0).mean())
-                    candidates = candidates[pd.to_numeric(candidates[a], errors="coerce").fillna(0) >= threshold]
-
-            candidates["momentum_score"] = candidates.apply(lambda r: compute_score_for_player(r, pos, None, False), axis=1)
-            top_targets = candidates.sort_values("momentum_score", ascending=False).head(8)
-
-            targets_out = []
-            for _, r in top_targets.iterrows():
-                rd = r.to_dict()
-                targets_out.append({
-                    "short_name": rd.get("short_name", "Unknown"),
-                    "club_position": rd.get("club_position", pos),
-                    "overall": safe_int(rd.get("overall", 0)),
-                    "value_eur": safe_int(rd.get("value_eur", 0)),
-                    "player_face_url": rd.get("player_face_url", ""),
-                    "full_attributes": {k: (0 if pd.isna(v) else v) for k, v in rd.items()},
-                })
-
-            report_blocks.append({
-                "position": pos,
-                "squad_score": squad_score,
-                "elite_score": elite_score,
-                "archetype": archetype,
-                "gaps": gaps[:6],
-                "weakest": weakest,
-                "reasoning": why_lines,
-                "targets": targets_out,
-            })
-
-        return jsonify({"success": True, "positions_found": squad_positions, "report": report_blocks}), 200
-
-    except Exception as e:
-        print("Squad gap analysis error:", repr(e), flush=True)
-        traceback.print_exc()
-        return jsonify({"success": False, "message": str(e)}), 500
-
-
 @app.route("/api/budget_target", methods=["POST", "OPTIONS"])
 def api_budget_target():
     try:
         payload = request.json or {}
-        max_wage = safe_int(payload.get("max_wage"), 500000)          # annual wage cap
+        max_wage = safe_int(payload.get("max_wage"), 500000)   # yearly wage cap
         contract_year = safe_int(payload.get("contract_year"), 2026)
 
+        # Guard: DB not loaded
         if player_data_base is None or player_data_base.empty:
             return jsonify({"targets": [], "error": "Database not loaded"}), 200
 
         df = player_data_base.copy()
 
-        # wage column (your CSV has wage_eur, which is weekly in most FIFA datasets)
-        wage_col = None
-        for c in ("wage_eur", "wage", "wage_weekly", "wage_yearly"):
-            if c in df.columns:
-                wage_col = c
-                break
+        # --- helpers to make JSON safe (NaN -> None, numpy types -> python types) ---
+        def json_safe(v):
+            try:
+                if pd.isna(v):
+                    return None
+            except Exception:
+                pass
+
+            # convert numpy scalar types
+            if isinstance(v, (np.integer,)):
+                return int(v)
+            if isinstance(v, (np.floating,)):
+                return float(v)
+            if isinstance(v, (np.bool_,)):
+                return bool(v)
+            return v
+
+        def dict_json_safe(d):
+            return {k: json_safe(v) for k, v in d.items()}
+
+        # --- find wage column ---
+        wage_col = next((c for c in ("wage_eur", "wage", "wage_weekly", "wage_yearly") if c in df.columns), None)
         if not wage_col:
-            return jsonify({"targets": [], "error": "Wage column not found in DB"}), 500
+            return jsonify({"targets": [], "error": "Wage column not found in DB"}), 200
 
-        # contract year column (your CSV has club_contract_valid_until_year)
-        year_col = None
-        for c in ("club_contract_valid_until_year", "contract_valid_until", "contract_end"):
-            if c in df.columns:
-                year_col = c
-                break
-
-        if year_col and year_col in df.columns:
+        # --- find contract year column ---
+        year_col = next((c for c in ("club_contract_valid_until_year", "contract_valid_until", "contract_end") if c in df.columns), None)
+        if year_col:
             df[year_col] = pd.to_numeric(df[year_col], errors="coerce").fillna(0).astype(int)
 
-        # Normalize wage to yearly
-        # If wage_eur is weekly, yearly = *52. If already yearly, keep as-is.
+        # --- normalize wage to yearly ---
+        wage_num = pd.to_numeric(df[wage_col], errors="coerce").fillna(0)
         if wage_col in ("wage_eur", "wage", "wage_weekly"):
-            df["wage_yearly_calc"] = pd.to_numeric(df[wage_col], errors="coerce").fillna(0) * 52
+            df["wage_yearly_calc"] = wage_num * 52
         else:
-            df["wage_yearly_calc"] = pd.to_numeric(df[wage_col], errors="coerce").fillna(0)
+            df["wage_yearly_calc"] = wage_num
 
-        # Apply filters
+        # --- apply filters ---
         df = df[df["wage_yearly_calc"] <= max_wage]
-
         if year_col:
             df = df[df[year_col] <= contract_year]
 
-        # Sort and return top 20
+        # --- sort and return top 20 ---
         df["overall"] = pd.to_numeric(df.get("overall", 0), errors="coerce").fillna(0).astype(int)
-        targets = df.sort_values(by="overall", ascending=False).head(20)
+        targets = df.sort_values("overall", ascending=False).head(20)
 
         out = []
         for _, row in targets.iterrows():
+            full_stats = dict_json_safe(row.to_dict())
+
             out.append({
-                "short_name": row.get("short_name", "Unknown"),
-                "club_position": row.get("club_position", "N/A"),
-                "overall": int(row.get("overall", 0)),
-                "value_eur": safe_int(row.get("value_eur", 0)),
-                "wage_yearly": safe_int(row.get("wage_yearly_calc", 0)),
-                "contract_end": int(row.get(year_col, 0)) if year_col else 0,
-                "full_stats": row.to_dict(),
+                "short_name": full_stats.get("short_name") or full_stats.get("name") or "Unknown",
+                "club_position": full_stats.get("club_position") or "N/A",
+                "overall": safe_int(full_stats.get("overall", 0)),
+                "value_eur": safe_int(full_stats.get("value_eur", 0)),
+                "wage_yearly": safe_int(full_stats.get("wage_yearly_calc", 0)),
+                "contract_end": safe_int(full_stats.get(year_col, 0)) if year_col else 0,
+                "full_stats": full_stats,  # ✅ now JSON-safe (no NaN)
             })
 
         return jsonify({"targets": out}), 200
@@ -1137,7 +1028,6 @@ def api_budget_target():
         print("Budget target error:", repr(e), flush=True)
         traceback.print_exc()
         return jsonify({"targets": [], "error": str(e)}), 500
-
 
 
 @app.route("/api/next_match", methods=["GET", "OPTIONS"])
