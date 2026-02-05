@@ -16,7 +16,7 @@ from io import StringIO
 from datetime import datetime
 import traceback
 import threading
-
+import math
 import numpy as np
 import pandas as pd
 import requests
@@ -632,6 +632,242 @@ def initialize_app():
         })
 
 
+      
+
+def _clean_json(v):
+    # prevents NaN causing "Unexpected token N" in frontend JSON parse
+    try:
+        if v is None:
+            return 0
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            return 0
+        if pd.isna(v):
+            return 0
+        return v
+    except Exception:
+        return 0
+
+def _sanitize_dict(d):
+    return {k: _clean_json(v) for k, v in (d or {}).items()}
+
+def _num(row, key, default=0.0):
+    try:
+        v = row.get(key, default)
+        if pd.isna(v):
+            return default
+        return float(v)
+    except Exception:
+        return default
+
+def compute_fit_score(row, position="CM", club_style="balanced"):
+    """
+    club_style: balanced / high_press / counter / possession
+    """
+    pos = (position or row.get("club_position") or "CM").upper()
+    weights = POSITION_WEIGHTS.get(pos, POSITION_WEIGHTS.get("CM", {})).copy()
+
+    # light style tweaks (fast to demo)
+    style = (club_style or "balanced").lower()
+    if style == "high_press":
+        weights["power_stamina"] = weights.get("power_stamina", 0) + 10
+        weights["pace"] = weights.get("pace", 0) + 5
+    elif style == "counter":
+        weights["pace"] = weights.get("pace", 0) + 10
+        weights["dribbling"] = weights.get("dribbling", 0) + 5
+    elif style == "possession":
+        weights["passing"] = weights.get("passing", 0) + 10
+        weights["mentality_vision"] = weights.get("mentality_vision", 0) + 5
+
+    total_w = sum(weights.values()) or 1
+    score = 0.0
+    for attr, w in weights.items():
+        val = _num(row, attr, 0.0)
+        score += (val / 100.0) * (w / total_w)
+
+    # small age bonus for development window
+    age = safe_int(row.get("age"), 23)
+    if age <= 23:
+        score += 0.03
+    elif age >= 30:
+        score -= 0.03
+
+    return int(max(0, min(100, round(score * 100))))
+
+def compute_momentum_index(row):
+    """
+    Quick trajectory proxy:
+    - potential gap (potential - overall)
+    - value signal vs overall
+    - age curve
+    Returns -100..+100 (we’ll cap it visually)
+    """
+    ovr = safe_int(row.get("overall"), 0)
+    pot = safe_int(row.get("potential"), ovr)
+    gap = pot - ovr
+
+    value = _num(row, "value_eur", 0.0)
+    age = safe_int(row.get("age"), 23)
+
+    # cheap normalization
+    value_signal = 0
+    if value > 0 and ovr > 0:
+        value_signal = min(20, max(-20, int((math.log10(value + 1) - 6) * 10)))  # rough
+
+    age_signal = 0
+    if age <= 23:
+        age_signal = 15
+    elif 24 <= age <= 27:
+        age_signal = 8
+    elif 28 <= age <= 30:
+        age_signal = 0
+    else:
+        age_signal = -12
+
+    momentum = (gap * 6) + value_signal + age_signal
+    momentum = int(max(-100, min(100, momentum)))
+
+    label = "Rising" if momentum >= 20 else "Stable" if momentum >= -10 else "Declining"
+    arrow = "up" if momentum >= 20 else "flat" if momentum >= -10 else "down"
+    return {"score": momentum, "label": label, "arrow": arrow}
+
+def compute_risk_profile(row):
+    """
+    Includes simple injury risk proxy:
+    - age
+    - stamina / physic (if available)
+    - (optional) injury_proneness if present
+    """
+    age = safe_int(row.get("age"), 23)
+    stamina = _num(row, "power_stamina", _num(row, "stamina", 50))
+    physic = _num(row, "physic", 50)
+    injury_prone = _num(row, "injury_proneness", 50)  # only if exists
+
+    # Injury risk proxy (0..100)
+    injury_risk = 30
+    injury_risk += max(0, (age - 27) * 3)
+    injury_risk += max(0, (55 - stamina) * 0.8)
+    injury_risk += max(0, (55 - physic) * 0.6)
+    injury_risk += max(0, (injury_prone - 50) * 0.6)
+    injury_risk = int(max(0, min(100, injury_risk)))
+
+    # Contract risk
+    end_year = safe_int(row.get("club_contract_valid_until_year"), 0)
+    contract_risk = 20
+    if end_year:
+        years_left = end_year - datetime.now().year
+        if years_left <= 1:
+            contract_risk = 65
+        elif years_left == 2:
+            contract_risk = 45
+        else:
+            contract_risk = 20
+
+    # Wage risk (high wage for low overall)
+    wage_weekly = _num(row, "wage_eur", 0.0)
+    ovr = safe_int(row.get("overall"), 0)
+    wage_risk = 15
+    if wage_weekly > 0 and ovr > 0:
+        yearly = wage_weekly * 52
+        if yearly > 3000000 and ovr < 80:
+            wage_risk = 70
+        elif yearly > 1500000 and ovr < 78:
+            wage_risk = 55
+        elif yearly > 1000000 and ovr < 75:
+            wage_risk = 45
+
+    def _band(x):
+        return "Low" if x < 35 else "Medium" if x < 65 else "High"
+
+    suggestions = []
+    if injury_risk >= 65:
+        suggestions.append("Limit minutes early; add recovery micro-cycles + strength maintenance.")
+    if wage_risk >= 55:
+        suggestions.append("Negotiate wage-to-role alignment; consider performance incentives.")
+    if contract_risk >= 60:
+        suggestions.append("Move quickly—short contract window increases competition & price volatility.")
+    if not suggestions:
+        suggestions.append("Low overall risk—focus on tactical onboarding and role clarity.")
+
+    return {
+        "injury_risk": injury_risk,
+        "contract_risk": int(contract_risk),
+        "wage_risk": int(wage_risk),
+        "injury_band": _band(injury_risk),
+        "contract_band": _band(contract_risk),
+        "wage_band": _band(wage_risk),
+        "ai_suggestions": suggestions[:3],
+    }
+
+def compute_deal_intel(row):
+    value = safe_int(row.get("value_eur"), 0)
+    release = safe_int(row.get("release_clause_eur"), 0)
+    end_year = safe_int(row.get("club_contract_valid_until_year"), 0)
+
+    leverage = "Unknown"
+    if end_year:
+        years_left = end_year - datetime.now().year
+        leverage = "High" if years_left <= 1 else "Medium" if years_left <= 2 else "Low"
+
+    clause_note = "No clause data"
+    if release > 0 and value > 0:
+        ratio = release / max(1, value)
+        if ratio <= 1.2:
+            clause_note = "Release clause close to market value (opportunity)"
+        elif ratio >= 2.0:
+            clause_note = "Release clause very high (negotiation needed)"
+        else:
+            clause_note = "Release clause reasonable vs value"
+
+    return {
+        "contract_end_year": end_year,
+        "leverage": leverage,
+        "release_clause_eur": release,
+        "clause_note": clause_note,
+    }
+
+def _feature_vector(row, keys):
+    vec = []
+    for k in keys:
+        vec.append(float(_num(row, k, 0.0)))
+    return np.array(vec, dtype=float)
+
+def find_similar_players(df, row, top_n=5):
+    # Keep keys small & reliable for speed
+    keys = [k for k in ["pace", "shooting", "passing", "dribbling", "defending", "physic", "overall"] if k in df.columns]
+    if not keys or df is None or df.empty:
+        return []
+
+    target = _feature_vector(row, keys)
+    norm_t = np.linalg.norm(target) or 1.0
+
+    sims = []
+    for idx, r in df.iterrows():
+        v = _feature_vector(r, keys)
+        norm_v = np.linalg.norm(v) or 1.0
+        sim = float(np.dot(target, v) / (norm_t * norm_v))
+        sims.append((sim, idx))
+
+    sims.sort(reverse=True, key=lambda x: x[0])
+
+    out = []
+    for sim, idx in sims[:top_n + 1]:  # +1 because first may be itself
+        r = df.loc[idx]
+        name = r.get("short_name") or r.get("name") or "Unknown"
+        if str(name) == str(row.get("short_name") or row.get("name")):
+            continue
+        out.append({
+            "short_name": str(name),
+            "club_position": r.get("club_position", "CM"),
+            "overall": safe_int(r.get("overall"), 0),
+            "value_eur": safe_int(r.get("value_eur"), 0),
+            "similarity": round(sim, 3),
+        })
+        if len(out) >= top_n:
+            break
+    return out
+
+
+
 # ----------------------------------------------------
 # ROUTES
 # ----------------------------------------------------
@@ -852,46 +1088,101 @@ def api_submit_demo():
 def api_find_players():
     try:
         data = request.json or {}
-        df = player_data_baller if data.get("data_source") == "baller" else player_data_base
+
+        is_baller = (data.get("data_source") == "baller")
+        df = player_data_baller if is_baller else player_data_base
         if df is None or df.empty:
             return jsonify({"players": [], "error": "Database not loaded"}), 200
 
         df = df.copy()
-        filters = data.get("filters", {})
+
+        # -----------------------------
+        # Filters
+        # -----------------------------
+        filters = data.get("filters", {}) or {}
         for key, rng in filters.items():
             col = clean_column_name(key)
             if "value" in col:
                 col = "value_eur"
+
             if col in df.columns and isinstance(rng, list) and len(rng) >= 2:
                 try:
-                    df = df[(df[col] >= float(rng[0])) & (df[col] <= float(rng[1]))]
+                    lo = float(rng[0])
+                    hi = float(rng[1])
+                    df = df[(pd.to_numeric(df[col], errors="coerce").fillna(0) >= lo) &
+                            (pd.to_numeric(df[col], errors="coerce").fillna(0) <= hi)]
                 except Exception:
                     continue
 
-        is_baller = (data.get("data_source") == "baller")
+        # -----------------------------
+        # Momentum score (ranking)
+        # -----------------------------
+        position_req = str(data.get("position", "ALL")).upper().strip()
+        weights_req = data.get("weights")
+
         df["momentum_score"] = df.apply(
-            lambda r: compute_score_for_player(r, data.get("position", "ALL"), data.get("weights"), is_baller),
+            lambda r: compute_score_for_player(r, position_req, weights_req, is_baller),
             axis=1,
         )
 
+        # -----------------------------
+        # Build output (top 20)
+        # -----------------------------
         out = []
         for _, row in df.sort_values("momentum_score", ascending=False).head(20).iterrows():
             p_dict = row.to_dict()
             p_dict = {k: (0 if pd.isna(v) else v) for k, v in p_dict.items()}
 
-            tp = generate_training_plan(row, row.get("club_position", "CM"), is_baller)
-            hm = generate_heatmap_data(row, row.get("club_position", "CM"))
+            row_pos = p_dict.get("club_position") or row.get("club_position") or "CM"
+
+            tp = generate_training_plan(row, row_pos, is_baller)
+            hm = generate_heatmap_data(row, row_pos)
+            projections = project_player(row)
+
+            # ✅ NEW 5 sections (safe defaults)
+            try:
+                fit = compute_fit_score(row, row_pos, data.get("club_style", "balanced"))
+            except Exception:
+                fit = 0
+
+            try:
+                momentum = compute_momentum_index(row)
+            except Exception:
+                momentum = {"score": 0, "label": "Unknown", "arrow": "flat"}
+
+            try:
+                risk = compute_risk_profile(row)
+            except Exception:
+                risk = {"injury_risk": 0, "notes": [], "ai_suggestion": ""}
+
+            try:
+                deal = compute_deal_intel(row)
+            except Exception:
+                deal = {"contract_end_year": safe_int(row.get("club_contract_valid_until_year"), 0)}
+
+            # optional: similars (can be heavy, but fine for top-20)
+            try:
+                similars = find_similar_players(df, row, top_n=5)
+            except Exception:
+                similars = []
 
             out.append({
-                "short_name": p_dict.get("short_name"),
-                "club_position": p_dict.get("club_position"),
-                "momentum_score": p_dict.get("momentum_score"),
-                "value_eur": p_dict.get("value_eur", 0),
+                "short_name": p_dict.get("short_name") or p_dict.get("name") or "Unknown",
+                "club_position": row_pos,
+                "momentum_score": safe_float(p_dict.get("momentum_score"), 0),
+                "value_eur": safe_int(p_dict.get("value_eur", 0)),
                 "player_face_url": p_dict.get("player_face_url", ""),
                 "ai_training": tp,
                 "heatmap_zones": hm,
                 "full_attributes": p_dict,
-                "projections": project_player(row),
+                "projections": projections,
+
+                # ✅ added fields
+                "fit_score": fit,
+                "momentum": momentum,
+                "risk_profile": risk,
+                "deal_intel": deal,
+                "similar_players": similars,
             })
 
         return jsonify({"players": out}), 200
@@ -899,6 +1190,7 @@ def api_find_players():
     except Exception as e:
         traceback.print_exc()
         return jsonify({"players": [], "error": str(e)}), 500
+
 
 
 @app.route("/api/search_player", methods=["POST", "OPTIONS"])
@@ -912,34 +1204,71 @@ def api_search_player():
         if df is None or df.empty or not query:
             return jsonify([]), 200
 
-        # short_name might not exist on some datasets
-        mask = pd.Series([False] * len(df))
+        # Build mask safely (handles missing cols)
+        mask = pd.Series(False, index=df.index)
         if "short_name" in df.columns:
             mask |= df["short_name"].astype(str).str.lower().str.contains(query, na=False)
         if "name" in df.columns:
             mask |= df["name"].astype(str).str.lower().str.contains(query, na=False)
 
-        results = df[mask].head(10)
+        results = df.loc[mask].head(10)
 
         out = []
         for _, row in results.iterrows():
             p_dict = row.to_dict()
             p_dict = {k: (0 if pd.isna(v) else v) for k, v in p_dict.items()}
-            score = compute_score_for_player(row, row.get("club_position", "CM"), None, is_baller)
+
+            row_pos = p_dict.get("club_position") or row.get("club_position") or "CM"
+
+            # existing analytics
+            score = compute_score_for_player(row, row_pos, None, is_baller)
             age = safe_int(row.get("age"), 21)
             projections = project_player(row, years_to_project(age))
-            tp = generate_training_plan(row, row.get("club_position", "CM"), is_baller)
-            hm = generate_heatmap_data(row, row.get("club_position", "CM"))
+            tp = generate_training_plan(row, row_pos, is_baller)
+            hm = generate_heatmap_data(row, row_pos)
+
+            # ✅ NEW 5 sections (safe defaults if funcs fail / not implemented yet)
+            try:
+                fit = compute_fit_score(row, row_pos, data.get("club_style", "balanced"))
+            except Exception:
+                fit = 0
+
+            try:
+                momentum = compute_momentum_index(row)
+            except Exception:
+                momentum = {"score": 0, "label": "Unknown", "arrow": "flat"}
+
+            try:
+                risk = compute_risk_profile(row)
+            except Exception:
+                risk = {"injury_risk": 0, "notes": [], "ai_suggestion": ""}
+
+            try:
+                deal = compute_deal_intel(row)
+            except Exception:
+                deal = {"contract_end_year": safe_int(row.get("club_contract_valid_until_year"), 0)}
+
+            try:
+                similars = find_similar_players(df, row, top_n=5)
+            except Exception:
+                similars = []
 
             out.append({
                 "short_name": p_dict.get("short_name") or p_dict.get("name") or "Unknown",
-                "club_position": p_dict.get("club_position", "CM"),
+                "club_position": row_pos,
                 "momentum_score": score,
                 "projections": projections,
                 "ai_training": tp,
                 "heatmap_zones": hm,
                 "value_eur": safe_int(p_dict.get("value_eur")),
                 "full_attributes": p_dict,
+
+                # ✅ added fields
+                "fit_score": fit,
+                "momentum": momentum,
+                "risk_profile": risk,
+                "deal_intel": deal,
+                "similar_players": similars,
             })
 
         return jsonify(out), 200
@@ -949,12 +1278,14 @@ def api_search_player():
         return jsonify([]), 500
 
 
+
 @app.route("/api/budget_target", methods=["POST", "OPTIONS"])
 def api_budget_target():
     try:
         payload = request.json or {}
         max_wage = safe_int(payload.get("max_wage"), 500000)   # yearly wage cap
         contract_year = safe_int(payload.get("contract_year"), 2026)
+        club_style = (payload.get("club_style") or "balanced").strip().lower()
 
         # Guard: DB not loaded
         if player_data_base is None or player_data_base.empty:
@@ -962,15 +1293,15 @@ def api_budget_target():
 
         df = player_data_base.copy()
 
-        # --- helpers to make JSON safe (NaN -> None, numpy types -> python types) ---
+        # -----------------------------
+        # JSON-safe helpers (NaN -> None, numpy -> python)
+        # -----------------------------
         def json_safe(v):
             try:
                 if pd.isna(v):
                     return None
             except Exception:
                 pass
-
-            # convert numpy scalar types
             if isinstance(v, (np.integer,)):
                 return int(v)
             if isinstance(v, (np.floating,)):
@@ -982,35 +1313,92 @@ def api_budget_target():
         def dict_json_safe(d):
             return {k: json_safe(v) for k, v in d.items()}
 
-        # --- find wage column ---
+        # -----------------------------
+        # Locate columns
+        # -----------------------------
         wage_col = next((c for c in ("wage_eur", "wage", "wage_weekly", "wage_yearly") if c in df.columns), None)
         if not wage_col:
             return jsonify({"targets": [], "error": "Wage column not found in DB"}), 200
 
-        # --- find contract year column ---
         year_col = next((c for c in ("club_contract_valid_until_year", "contract_valid_until", "contract_end") if c in df.columns), None)
         if year_col:
             df[year_col] = pd.to_numeric(df[year_col], errors="coerce").fillna(0).astype(int)
 
-        # --- normalize wage to yearly ---
-        wage_num = pd.to_numeric(df[wage_col], errors="coerce").fillna(0)
-        if wage_col in ("wage_eur", "wage", "wage_weekly"):
-            df["wage_yearly_calc"] = wage_num * 52
-        else:
-            df["wage_yearly_calc"] = wage_num
+        # ensure a position column exists-ish for scoring/fit
+        pos_col = "club_position" if "club_position" in df.columns else None
 
-        # --- apply filters ---
+        # -----------------------------
+        # Normalize wage to yearly
+        # -----------------------------
+        wage_num = pd.to_numeric(df[wage_col], errors="coerce").fillna(0)
+        df["wage_yearly_calc"] = wage_num * 52 if wage_col in ("wage_eur", "wage", "wage_weekly") else wage_num
+
+        # -----------------------------
+        # Apply filters
+        # -----------------------------
         df = df[df["wage_yearly_calc"] <= max_wage]
         if year_col:
             df = df[df[year_col] <= contract_year]
 
-        # --- sort and return top 20 ---
-        df["overall"] = pd.to_numeric(df.get("overall", 0), errors="coerce").fillna(0).astype(int)
-        targets = df.sort_values("overall", ascending=False).head(20)
+        if df.empty:
+            return jsonify({"targets": [], "error": "No players matched constraints"}), 200
 
+        # -----------------------------
+        # Sort by overall (and momentum as tiebreaker)
+        # -----------------------------
+        df["overall"] = pd.to_numeric(df.get("overall", 0), errors="coerce").fillna(0).astype(int)
+
+        # optional: compute momentum_score for better ranking context
+        # (cheap and helps your demo)
+        try:
+            df["momentum_score"] = df.apply(
+                lambda r: compute_score_for_player(r, (r.get("club_position") if pos_col else "CM") or "CM", None, False),
+                axis=1,
+            )
+        except Exception:
+            df["momentum_score"] = 0
+
+        targets = df.sort_values(["overall", "momentum_score"], ascending=[False, False]).head(20)
+
+        # -----------------------------
+        # Build output
+        # -----------------------------
         out = []
         for _, row in targets.iterrows():
             full_stats = dict_json_safe(row.to_dict())
+            row_pos = (full_stats.get("club_position") or "CM") if pos_col else "CM"
+
+            # ✅ NEW 5 sections (safe defaults)
+            try:
+                fit = compute_fit_score(row, row_pos, club_style)
+            except Exception:
+                fit = 0
+
+            try:
+                momentum = compute_momentum_index(row)
+            except Exception:
+                momentum = {"score": safe_float(full_stats.get("momentum_score"), 0), "label": "Unknown", "arrow": "flat"}
+
+            try:
+                risk = compute_risk_profile(row)
+            except Exception:
+                risk = {"injury_risk": 0, "notes": [], "ai_suggestion": ""}
+
+            try:
+                deal = compute_deal_intel(row)
+            except Exception:
+                deal = {
+                    "contract_end_year": safe_int(full_stats.get(year_col, 0)) if year_col else 0,
+                    "release_clause_eur": safe_int(full_stats.get("release_clause_eur", 0)),
+                    "ai_note": "",
+                }
+
+            # similars are optional here (budget targets list can be “heavy”)
+            # if you want it, keep it light:
+            try:
+                similars = find_similar_players(df, row, top_n=3)
+            except Exception:
+                similars = []
 
             out.append({
                 "short_name": full_stats.get("short_name") or full_stats.get("name") or "Unknown",
@@ -1019,7 +1407,17 @@ def api_budget_target():
                 "value_eur": safe_int(full_stats.get("value_eur", 0)),
                 "wage_yearly": safe_int(full_stats.get("wage_yearly_calc", 0)),
                 "contract_end": safe_int(full_stats.get(year_col, 0)) if year_col else 0,
-                "full_stats": full_stats,  # ✅ now JSON-safe (no NaN)
+
+                # existing
+                "full_stats": full_stats,
+
+                # ✅ added fields
+                "momentum_score": safe_float(full_stats.get("momentum_score"), 0),
+                "fit_score": fit,
+                "momentum": momentum,
+                "risk_profile": risk,
+                "deal_intel": deal,
+                "similar_players": similars,
             })
 
         return jsonify({"targets": out}), 200
