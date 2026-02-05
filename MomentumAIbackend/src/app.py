@@ -880,34 +880,6 @@ def find_similar_players(df, row, top_n=5):
 @app.route("/", methods=["GET", "OPTIONS"])
 def health():
     return jsonify({"status": "online"}), 200
-# ----------------------------------------------------
-# ROUTES
-# ----------------------------------------------------
-@app.route("/", methods=["GET", "OPTIONS"])
-def health():
-    return jsonify({"status": "online"}), 200
-
-
-# ✅ ADD THESE RIGHT HERE (after health, before other routes)
-@app.route("/api/search_player", methods=["OPTIONS"])
-def api_search_player_options():
-    return _add_cors_headers(make_response("", 204))
-
-@app.route("/api/find_players", methods=["OPTIONS"])
-def api_find_players_options():
-    return _add_cors_headers(make_response("", 204))
-
-@app.route("/api/budget_target", methods=["OPTIONS"])
-def api_budget_target_options():
-    return _add_cors_headers(make_response("", 204))
-
-@app.route("/api/verify_login", methods=["OPTIONS"])
-def api_verify_login_options():
-    return _add_cors_headers(make_response("", 204))
-
-@app.route("/api/submit_demo", methods=["OPTIONS"])
-def api_submit_demo_options():
-    return _add_cors_headers(make_response("", 204))
 
 
 @app.route("/api/debug_fs", methods=["GET"])
@@ -946,9 +918,6 @@ def api_debug_fs():
         "probes": probes,
     }), 200
 
-@app.route("/api/debug_fs", methods=["GET"])
-def api_debug_fs():
-    ...
 
 # ✅ ADD THIS RIGHT AFTER debug_fs
 @app.route("/api/cors_debug", methods=["GET", "OPTIONS"])
@@ -986,7 +955,7 @@ def api_sample_player():
     }), 200
 
 
-@app.route("/api/verify_login", methods=["POST", "OPTIONS"])
+@app.route("/api/verify_login", methods=["POST"])
 def api_verify_login():
     data = request.json or {}
     email = (data.get("email") or "").strip().lower()
@@ -1044,7 +1013,7 @@ def api_verify_login():
         return jsonify({"success": False, "message": f"System Error: {str(e)}"}), 500
 
 
-@app.route("/api/submit_demo", methods=["POST", "OPTIONS"])
+@app.route("/api/submit_demo", methods=["POST"])
 def api_submit_demo():
     if request.method == "OPTIONS":
         return _add_cors_headers(make_response("", 204))
@@ -1132,7 +1101,7 @@ def api_submit_demo():
         return jsonify({"success": False, "message": "Submission error. Please try again."}), 500
 
 
-@app.route("/api/find_players", methods=["POST", "OPTIONS"])
+@app.route("/api/find_players", methods=["POST"])
 def api_find_players():
     try:
         data = request.json or {}
@@ -1241,7 +1210,7 @@ def api_find_players():
 
 
 
-@app.route("/api/search_player", methods=["POST", "OPTIONS"])
+@app.route("/api/search_player", methods=["POST"])
 def api_search_player():
     try:
         data = request.json or {}
@@ -1327,7 +1296,7 @@ def api_search_player():
 
 
 
-@app.route("/api/budget_target", methods=["POST", "OPTIONS"])
+@app.route("/api/budget_target", methods=["POST"])
 def api_budget_target():
     try:
         payload = request.json or {}
