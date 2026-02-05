@@ -49,11 +49,17 @@ ALLOWED_ORIGINS = {
 }
 ALLOWED_ORIGINS = {o for o in ALLOWED_ORIGINS if o and isinstance(o, str)}
 
+def _norm_origin(o: str) -> str:
+    return (o or "").strip().lower().rstrip("/")
+
+ALLOWED_ORIGINS = {_norm_origin(o) for o in ALLOWED_ORIGINS if o}
+
 def _cors_origin():
-    origin = request.headers.get("Origin")
+    origin = _norm_origin(request.headers.get("Origin"))
     if origin and origin in ALLOWED_ORIGINS:
         return origin
     return None
+
 
 def _add_cors_headers(resp):
     origin = _cors_origin()
@@ -999,7 +1005,7 @@ def api_verify_login():
 @app.route("/api/submit_demo", methods=["POST", "OPTIONS"])
 def api_submit_demo():
     if request.method == "OPTIONS":
-        return ("", 204)
+        return _add_cors_headers(make_response("", 204))
 
     try:
         data = request.json or {}
