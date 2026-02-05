@@ -63,25 +63,43 @@ def _cors_origin():
 
 
 def _add_cors_headers(resp):
+    # Get the origin from the request
     origin = request.headers.get("Origin")
-    # If the origin is in our list, allow it specifically
-    if origin and _norm_origin(origin) in ALLOWED_ORIGINS:
+    
+    # We will allow our specific Netlify domain or localhost
+    allowed_origins = [
+        "https://momentumscout.netlify.app",
+        "https://momentum-ai-io.netlify.app",
+        "http://localhost:5500",
+        "http://127.0.0.1:5500"
+    ]
+
+    # If the origin is in our list, reflect it back. 
+    # Otherwise, default to your main production site.
+    if origin in allowed_origins:
         resp.headers["Access-Control-Allow-Origin"] = origin
     else:
-        # Fallback to the primary Netlify URL so it doesn't just fail
         resp.headers["Access-Control-Allow-Origin"] = "https://momentumscout.netlify.app"
-        
+
     resp.headers["Vary"] = "Origin"
     resp.headers["Access-Control-Allow-Credentials"] = "true"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    
     return resp
 
 @app.before_request
 def cors_preflight():
     if request.method == "OPTIONS":
+        # Create a blank response
         resp = make_response("", 204)
-        return _add_cors_headers(resp)
+        # Manually add the headers here to be safe
+        origin = request.headers.get("Origin")
+        resp.headers["Access-Control-Allow-Origin"] = origin if origin else "*"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        resp.headers["Access-Control-Allow-Credentials"] = "true"
+        return resp
 
 @app.after_request
 def cors_after(resp):
