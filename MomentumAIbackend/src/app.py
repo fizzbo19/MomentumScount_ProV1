@@ -63,13 +63,18 @@ def _cors_origin():
 
 
 def _add_cors_headers(resp):
-    origin = _cors_origin()
-    if origin:
+    origin = request.headers.get("Origin")
+    # If the origin is in our list, allow it specifically
+    if origin and _norm_origin(origin) in ALLOWED_ORIGINS:
         resp.headers["Access-Control-Allow-Origin"] = origin
-        resp.headers["Vary"] = "Origin"
-        resp.headers["Access-Control-Allow-Credentials"] = "true"
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    else:
+        # Fallback to the primary Netlify URL so it doesn't just fail
+        resp.headers["Access-Control-Allow-Origin"] = "https://momentumscout.netlify.app"
+        
+    resp.headers["Vary"] = "Origin"
+    resp.headers["Access-Control-Allow-Credentials"] = "true"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return resp
 
 @app.before_request
