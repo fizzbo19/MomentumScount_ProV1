@@ -880,6 +880,34 @@ def find_similar_players(df, row, top_n=5):
 @app.route("/", methods=["GET", "OPTIONS"])
 def health():
     return jsonify({"status": "online"}), 200
+# ----------------------------------------------------
+# ROUTES
+# ----------------------------------------------------
+@app.route("/", methods=["GET", "OPTIONS"])
+def health():
+    return jsonify({"status": "online"}), 200
+
+
+# ✅ ADD THESE RIGHT HERE (after health, before other routes)
+@app.route("/api/search_player", methods=["OPTIONS"])
+def api_search_player_options():
+    return _add_cors_headers(make_response("", 204))
+
+@app.route("/api/find_players", methods=["OPTIONS"])
+def api_find_players_options():
+    return _add_cors_headers(make_response("", 204))
+
+@app.route("/api/budget_target", methods=["OPTIONS"])
+def api_budget_target_options():
+    return _add_cors_headers(make_response("", 204))
+
+@app.route("/api/verify_login", methods=["OPTIONS"])
+def api_verify_login_options():
+    return _add_cors_headers(make_response("", 204))
+
+@app.route("/api/submit_demo", methods=["OPTIONS"])
+def api_submit_demo_options():
+    return _add_cors_headers(make_response("", 204))
 
 
 @app.route("/api/debug_fs", methods=["GET"])
@@ -917,6 +945,20 @@ def api_debug_fs():
         "resolved_exists": os.path.exists(resolved),
         "probes": probes,
     }), 200
+
+@app.route("/api/debug_fs", methods=["GET"])
+def api_debug_fs():
+    ...
+
+# ✅ ADD THIS RIGHT AFTER debug_fs
+@app.route("/api/cors_debug", methods=["GET", "OPTIONS"])
+def api_cors_debug():
+    return _add_cors_headers(jsonify({
+        "origin_raw": request.headers.get("Origin"),
+        "origin_norm": _norm_origin(request.headers.get("Origin")),
+        "matched": _cors_origin() is not None,
+        "method": request.method,
+    }))
 
 
 @app.route("/api/sample_player", methods=["GET"])
