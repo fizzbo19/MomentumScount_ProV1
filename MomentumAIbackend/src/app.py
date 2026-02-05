@@ -39,6 +39,7 @@ ALLOWED_ORIGINS = {
     "https://momentumscout.netlify.app",
     "https://momentum-ai-io.netlify.app",
     "https://momentumscout.com",
+    "https://momentum-ai-io.netlify.app/",
     "https://www.momentumscout.com",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
