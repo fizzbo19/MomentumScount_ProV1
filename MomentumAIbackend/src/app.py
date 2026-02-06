@@ -34,7 +34,9 @@ app = Flask(__name__, static_folder="public")
 FRONTEND_URL = (os.environ.get("FRONTEND_URL", "https://momentum-ai-io.netlify.app") or "").rstrip("/")
 
 # ✅ IMPORTANT: CORS origins must be scheme+host only (no /path)
-ALLOWED_ORIGINS = {
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://momentumscout.netlify.app")
+
+RAW_ALLOWED_ORIGINS = {
     FRONTEND_URL,
     "https://momentumscout.netlify.app",
     "https://momentum-ai-io.netlify.app",
@@ -47,13 +49,19 @@ ALLOWED_ORIGINS = {
     "http://localhost:5500",
     "http://127.0.0.1:5500",
 }
-ALLOWED_ORIGINS = {o for o in ALLOWED_ORIGINS if o and isinstance(o, str)}
+
+ALLOWED_ORIGINS = {_norm_origin(o) for o in RAW_ALLOWED_ORIGINS if o and isinstance(o, str)}
+
 
 def _norm_origin(o: str) -> str:
     return (o or "").strip().lower().rstrip("/")
 
 def _apply_cors(resp):
     origin = _norm_origin(request.headers.get("Origin"))
+
+    if origin and origin not in ALLOWED_ORIGINS:
+        print(f"⚠️ CORS blocked Origin={origin} allowed={sorted(ALLOWED_ORIGINS)}", flush=True)
+
     if origin in ALLOWED_ORIGINS:
         resp.headers["Access-Control-Allow-Origin"] = origin
         resp.headers["Vary"] = "Origin"
@@ -61,6 +69,7 @@ def _apply_cors(resp):
         resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     return resp
+
 
 @app.before_request
 def cors_preflight():
