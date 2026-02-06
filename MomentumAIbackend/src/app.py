@@ -134,7 +134,8 @@ def _send_emails_bg(app, internal_msg, customer_msg):
 # ----------------------------------------------------
 @app.route("/api/ping", methods=["GET", "OPTIONS"])
 def api_ping():
-    return jsonify({"ok": True}), 200
+    return _apply_cors(jsonify({"ok": True}))
+
 
 
 # ----------------------------------------------------
@@ -880,13 +881,13 @@ def find_similar_players(df, row, top_n=5):
 # ----------------------------------------------------
 @app.route("/", methods=["GET", "OPTIONS"])
 def health():
-    return jsonify({"status": "online"}), 200
+    return _apply_cors(jsonify({"status": "online"}))
 
 
-@app.route("/api/debug_fs", methods=["GET"])
+
+@app.route("/api/debug_fs", methods=["GET", "OPTIONS"])
 def api_debug_fs():
     base = os.getcwd()
-
     candidates = [
         base,
         os.path.dirname(os.path.abspath(__file__)),
@@ -909,7 +910,7 @@ def api_debug_fs():
         probes.append(item)
 
     resolved = os.path.join(DATA_FOLDER_PATH, DATA_FILENAME_BASE)
-    return jsonify({
+    resp = jsonify({
         "cwd": base,
         "base_dir": os.path.dirname(os.path.abspath(__file__)),
         "data_folder_path": DATA_FOLDER_PATH,
@@ -917,7 +918,10 @@ def api_debug_fs():
         "resolved_csv_path": resolved,
         "resolved_exists": os.path.exists(resolved),
         "probes": probes,
-    }), 200
+    })
+    return _apply_cors(resp)
+
+
 
 
 # ✅ ADD THIS RIGHT AFTER debug_fs
@@ -1207,10 +1211,11 @@ def api_find_players():
         return jsonify({"players": out}), 200
 
     except Exception as e:
-            traceback.print_exc()
-    resp = jsonify({"error": str(e)})
-    resp.status_code = 500
-    return _apply_cors(resp)
+        traceback.print_exc()
+        resp = jsonify({"error": str(e)})
+        resp.status_code = 500
+        return _apply_cors(resp)
+
 
 
 
@@ -1296,10 +1301,11 @@ def api_search_player():
         return jsonify(out), 200
 
     except Exception as e:
-            traceback.print_exc()
-    resp = jsonify({"error": str(e)})
-    resp.status_code = 500
-    return _apply_cors(resp)
+        traceback.print_exc()
+        resp = jsonify({"error": str(e)})
+        resp.status_code = 500
+        return _apply_cors(resp)
+
 
 
 
@@ -1449,9 +1455,10 @@ def api_budget_target():
 
     except Exception as e:
         traceback.print_exc()
-    resp = jsonify({"error": str(e)})
-    resp.status_code = 500
-    return _apply_cors(resp)
+        resp = jsonify({"error": str(e)})
+        resp.status_code = 500
+        return _apply_cors(resp)
+
 
 
 
