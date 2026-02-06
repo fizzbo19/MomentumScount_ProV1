@@ -32,11 +32,8 @@ app = Flask(__name__, static_folder="public")
 def _norm_origin(o: str) -> str:
     return (o or "").strip().lower().rstrip("/")
 
-# ✅ IMPORTANT: CORS origins must be scheme+host only (no /path)
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://momentumscout.netlify.app")
-
 RAW_ALLOWED_ORIGINS = {
-    FRONTEND_URL,
+    os.environ.get("FRONTEND_URL", "https://momentum-ai-io.netlify.app"),
     "https://momentumscout.netlify.app",
     "https://momentum-ai-io.netlify.app",
     "https://momentumscout.com",
@@ -52,19 +49,23 @@ RAW_ALLOWED_ORIGINS = {
 ALLOWED_ORIGINS = {_norm_origin(o) for o in RAW_ALLOWED_ORIGINS if o and isinstance(o, str)}
 
 
+
 def _apply_cors(resp):
-    origin = _norm_origin(request.headers.get("Origin"))
+    origin_raw = request.headers.get("Origin")
+    origin = _norm_origin(origin_raw)
 
     if origin and origin not in ALLOWED_ORIGINS:
-        print(f"⚠️ CORS blocked Origin={origin} allowed={sorted(ALLOWED_ORIGINS)}", flush=True)
+        print(f"⚠️ CORS blocked Origin_raw={origin_raw} origin_norm={origin}", flush=True)
 
     if origin in ALLOWED_ORIGINS:
-        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Access-Control-Allow-Origin"] = origin_raw.rstrip("/")  # or origin_raw as-is
         resp.headers["Vary"] = "Origin"
         resp.headers["Access-Control-Allow-Credentials"] = "true"
         resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+
     return resp
+
 
 
 @app.before_request
@@ -140,9 +141,6 @@ def _send_emails_bg(app, internal_msg, customer_msg):
 @app.route("/api/ping", methods=["GET", "OPTIONS"])
 def api_ping():
     return _apply_cors(jsonify({"ok": True}))
-
-
-
 # ----------------------------------------------------
 # CONSTANTS / CONFIG
 # ----------------------------------------------------
@@ -642,10 +640,7 @@ def initialize_app():
             "role": "Admin",
             "tier": "Tier 1",
             "plan": "yearly",
-        })
-
-
-      
+        })    
 
 def _clean_json(v):
     # prevents NaN causing "Unexpected token N" in frontend JSON parse
@@ -878,8 +873,6 @@ def find_similar_players(df, row, top_n=5):
         if len(out) >= top_n:
             break
     return out
-
-
 
 # ----------------------------------------------------
 # ROUTES
@@ -1222,9 +1215,6 @@ def api_find_players():
         return _apply_cors(resp)
 
 
-
-
-
 @app.route("/api/search_player", methods=["POST", "OPTIONS"])
 def api_search_player():
     try:
@@ -1310,9 +1300,6 @@ def api_search_player():
         resp = jsonify({"error": str(e)})
         resp.status_code = 500
         return _apply_cors(resp)
-
-
-
 
 
 @app.route("/api/budget_target", methods=["POST", "OPTIONS"])
@@ -1463,9 +1450,6 @@ def api_budget_target():
         resp = jsonify({"error": str(e)})
         resp.status_code = 500
         return _apply_cors(resp)
-
-
-
 
 @app.route("/api/next_match", methods=["GET", "OPTIONS"])
 def api_next_match():
