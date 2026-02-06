@@ -39,7 +39,6 @@ ALLOWED_ORIGINS = {
     "https://momentumscout.netlify.app",
     "https://momentum-ai-io.netlify.app",
     "https://momentumscout.com",
-    "https://momentum-ai-io.netlify.app/",
     "https://www.momentumscout.com",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -52,14 +51,6 @@ ALLOWED_ORIGINS = {o for o in ALLOWED_ORIGINS if o and isinstance(o, str)}
 
 def _norm_origin(o: str) -> str:
     return (o or "").strip().lower().rstrip("/")
-
-ALLOWED_ORIGINS = {
-    "https://momentumscout.netlify.app",
-    "https://momentum-ai-io.netlify.app",
-    "http://localhost:5500",
-    "http://127.0.0.1:5500",
-}
-ALLOWED_ORIGINS = {_norm_origin(o) for o in ALLOWED_ORIGINS}
 
 def _apply_cors(resp):
     origin = _norm_origin(request.headers.get("Origin"))
@@ -932,10 +923,10 @@ def api_debug_fs():
 # ✅ ADD THIS RIGHT AFTER debug_fs
 @app.route("/api/cors_debug", methods=["GET", "OPTIONS"])
 def api_cors_debug():
-    return _add_cors_headers(jsonify({
+    return _apply_cors(jsonify({
         "origin_raw": request.headers.get("Origin"),
         "origin_norm": _norm_origin(request.headers.get("Origin")),
-        "matched": _cors_origin() is not None,
+        "matched": _norm_origin(request.headers.get("Origin")) in ALLOWED_ORIGINS,
         "method": request.method,
     }))
 
@@ -1026,7 +1017,8 @@ def api_verify_login():
 @app.route("/api/submit_demo", methods=["POST"])
 def api_submit_demo():
     if request.method == "OPTIONS":
-        return _add_cors_headers(make_response("", 204))
+        return _apply_cors(make_response("", 204))
+
 
     try:
         data = request.json or {}
@@ -1111,7 +1103,7 @@ def api_submit_demo():
         return jsonify({"success": False, "message": "Submission error. Please try again."}), 500
 
 
-@app.route("/api/find_players", methods=["POST"])
+@app.route("/api/find_players", methods=["POST", "OPTIONS"])
 def api_find_players():
     try:
         data = request.json or {}
@@ -1215,12 +1207,15 @@ def api_find_players():
         return jsonify({"players": out}), 200
 
     except Exception as e:
-        traceback.print_exc()
-        return jsonify({"players": [], "error": str(e)}), 500
+            traceback.print_exc()
+    resp = jsonify({"error": str(e)})
+    resp.status_code = 500
+    return _apply_cors(resp)
 
 
 
-@app.route("/api/search_player", methods=["POST"])
+
+@app.route("/api/search_player", methods=["POST", "OPTIONS"])
 def api_search_player():
     try:
         data = request.json or {}
@@ -1300,13 +1295,16 @@ def api_search_player():
 
         return jsonify(out), 200
 
-    except Exception:
-        traceback.print_exc()
-        return jsonify([]), 500
+    except Exception as e:
+            traceback.print_exc()
+    resp = jsonify({"error": str(e)})
+    resp.status_code = 500
+    return _apply_cors(resp)
 
 
 
-@app.route("/api/budget_target", methods=["POST"])
+
+@app.route("/api/budget_target", methods=["POST", "OPTIONS"])
 def api_budget_target():
     try:
         payload = request.json or {}
@@ -1450,9 +1448,11 @@ def api_budget_target():
         return jsonify({"targets": out}), 200
 
     except Exception as e:
-        print("Budget target error:", repr(e), flush=True)
         traceback.print_exc()
-        return jsonify({"targets": [], "error": str(e)}), 500
+    resp = jsonify({"error": str(e)})
+    resp.status_code = 500
+    return _apply_cors(resp)
+
 
 
 @app.route("/api/next_match", methods=["GET", "OPTIONS"])
