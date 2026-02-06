@@ -28,10 +28,9 @@ from flask_mail import Mail, Message
 # ----------------------------------------------------
 app = Flask(__name__, static_folder="public")
 
-# ----------------------------------------------------
-# CORS CONFIG (ROBUST + SAFE)
-# ----------------------------------------------------
-FRONTEND_URL = (os.environ.get("FRONTEND_URL", "https://momentum-ai-io.netlify.app") or "").rstrip("/")
+
+def _norm_origin(o: str) -> str:
+    return (o or "").strip().lower().rstrip("/")
 
 # ✅ IMPORTANT: CORS origins must be scheme+host only (no /path)
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://momentumscout.netlify.app")
@@ -52,9 +51,6 @@ RAW_ALLOWED_ORIGINS = {
 
 ALLOWED_ORIGINS = {_norm_origin(o) for o in RAW_ALLOWED_ORIGINS if o and isinstance(o, str)}
 
-
-def _norm_origin(o: str) -> str:
-    return (o or "").strip().lower().rstrip("/")
 
 def _apply_cors(resp):
     origin = _norm_origin(request.headers.get("Origin"))
