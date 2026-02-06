@@ -53,57 +53,43 @@ ALLOWED_ORIGINS = {o for o in ALLOWED_ORIGINS if o and isinstance(o, str)}
 def _norm_origin(o: str) -> str:
     return (o or "").strip().lower().rstrip("/")
 
-ALLOWED_ORIGINS = {_norm_origin(o) for o in ALLOWED_ORIGINS if o}
+ALLOWED_ORIGINS = {
+    "https://momentumscout.netlify.app",
+    "https://momentum-ai-io.netlify.app",
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
+}
+ALLOWED_ORIGINS = {_norm_origin(o) for o in ALLOWED_ORIGINS}
 
-def _cors_origin():
+def _apply_cors(resp):
     origin = _norm_origin(request.headers.get("Origin"))
-    if origin and origin in ALLOWED_ORIGINS:
-        return origin
-    return None
-
-
-def _add_cors_headers(resp):
-    # Get the origin from the request
-    origin = request.headers.get("Origin")
-    
-    # We will allow our specific Netlify domain or localhost
-    allowed_origins = [
-        "https://momentumscout.netlify.app",
-        "https://momentum-ai-io.netlify.app",
-        "http://localhost:5500",
-        "http://127.0.0.1:5500"
-    ]
-
-    # If the origin is in our list, reflect it back. 
-    # Otherwise, default to your main production site.
-    if origin in allowed_origins:
+    if origin in ALLOWED_ORIGINS:
         resp.headers["Access-Control-Allow-Origin"] = origin
-    else:
-        resp.headers["Access-Control-Allow-Origin"] = "https://momentumscout.netlify.app"
-
-    resp.headers["Vary"] = "Origin"
-    resp.headers["Access-Control-Allow-Credentials"] = "true"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    
+        resp.headers["Vary"] = "Origin"
+        resp.headers["Access-Control-Allow-Credentials"] = "true"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     return resp
 
 @app.before_request
 def cors_preflight():
     if request.method == "OPTIONS":
-        # Create a blank response
         resp = make_response("", 204)
-        # Manually add the headers here to be safe
-        origin = request.headers.get("Origin")
-        resp.headers["Access-Control-Allow-Origin"] = origin if origin else "*"
-        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        resp.headers["Access-Control-Allow-Credentials"] = "true"
-        return resp
+        return _apply_cors(resp)
 
 @app.after_request
 def cors_after(resp):
-    return _add_cors_headers(resp)
+    return _apply_cors(resp)
+
+# IMPORTANT: make sure errors also return CORS headers
+@app.errorhandler(Exception)
+def handle_any_error(e):
+    print("🔥 Unhandled error:", repr(e), flush=True)
+    traceback.print_exc()
+    resp = jsonify({"success": False, "error": str(e)})
+    resp.status_code = 500
+    return _apply_cors(resp)
+
 
 
 # ----------------------------------------------------
@@ -1511,10 +1497,6 @@ def serve_assets(filename):
     return send_from_directory(os.path.join(app.root_path, "public/assets"), filename)
 
 
-
-# ----------------------------------------------------
-# STARTUP
-# ----------------------------------------------------
 # ----------------------------------------------------
 # STARTUP
 # ----------------------------------------------------
