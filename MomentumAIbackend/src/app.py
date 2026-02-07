@@ -203,6 +203,8 @@ def is_owner(email: str) -> bool:
 player_data_base = None
 player_data_baller = None
 next_match_data = None
+POS_BENCHMARKS = {}
+
 
 # ----------------------------------------------------
 # WEIGHTS & DRILLS (unchanged)
@@ -930,7 +932,7 @@ def health():
     return(jsonify({"status": "online"}))
 
 @app.route("/api/squad_gap_analysis", methods=["POST", "OPTIONS"])
-def api_squad_gap_analysis():
+def api_squad_gap_analysisv2():
     # Preflight handled globally, but safe to keep:
     if request.method == "OPTIONS":
         return ("", 204)
@@ -940,9 +942,7 @@ def api_squad_gap_analysis():
         csv_text = str(payload.get("csv_text") or "")
         scope_pos = str(payload.get("position") or "ALL").upper().strip()
         club_style = str(payload.get("club_style") or "balanced").strip().lower()
-        age = safe_int(p.get("age", 23), 23)
-        projections = project_player(row, years_to_project(age))
-        bench = POS_BENCHMARKS.get(row_pos, POS_BENCHMARKS.get("CM", {}))
+       
 
 
         if not csv_text.strip():
@@ -987,6 +987,12 @@ def api_squad_gap_analysis():
 
         # Normalize column names
         squad_df.columns = [clean_column_name(c) for c in squad_df.columns]
+        squad_age_avg = None
+        if "age" in squad_df.columns:
+            ages = pd.to_numeric(squad_df["age"], errors="coerce").fillna(0)
+            ages = ages[ages > 0]
+            squad_age_avg = int(round(float(ages.mean()))) if len(ages) else None
+
 
         # Try to infer the squad position column
         pos_col = _infer_position_col(squad_df) or ""
@@ -1184,6 +1190,11 @@ def api_squad_gap_analysis():
             for _, row in targets_df.iterrows():
                 p = _dict_safe(row.to_dict())
                 row_pos = (p.get("club_position") or pos or "CM")
+                    # ✅ Player-level extras (DEFINED HERE because row/p/row_pos exist here)
+                age = safe_int(p.get("age", row.get("age", 23)), 23)
+                projections = project_player(row, years=years_to_project(age))
+                bench = POS_BENCHMARKS.get(row_pos, POS_BENCHMARKS.get("CM", {}))
+
 
                 try:
                     fit = compute_fit_score(row, row_pos, club_style)
@@ -1219,6 +1230,8 @@ def api_squad_gap_analysis():
                     "value_eur": safe_int(p.get("value_eur", 0)),
                     "player_face_url": p.get("player_face_url", ""),
                     "full_attributes": p,
+                    "projections": projections,
+                    "benchmarks": bench,
                     "momentum_score": safe_float(p.get("momentum_score"), 0),
                     "fit_score": fit,
                     "momentum": mom,
