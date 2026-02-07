@@ -476,6 +476,15 @@
               ></div>
             </div>
 
+            <div class="bg-gray-900 p-4 rounded-lg border border-gray-600 chart-container">
+                <canvas id="projectionChart"></canvas>
+              </div>
+              
+              <div class="bg-gray-900 p-4 rounded-lg border border-gray-600 chart-container">
+                <canvas id="benchmarkChart"></canvas>
+              </div>
+              
+
             <div class="md:col-span-1 space-y-4">
               <h3 class="text-lg font-bold text-green-400">
                 MomentumAI Reports
@@ -536,6 +545,9 @@
         squadPositionSelect;
 
       let detailedStatsTable, trainingRegime;
+      let projectionChart = null;
+      let benchmarkChart = null;
+
 
       /* =========================
          ✅ NEW HELPERS (safe add)
@@ -577,7 +589,7 @@
         return `£${(gbp / 1000).toFixed(0)}k`;
       }
 
-      
+
       async function safePost(endpoint, body) {
   const url = BACKEND_BASE + endpoint;
 
@@ -1217,8 +1229,27 @@
 
       async function handleBudgetTargeting() {
         const list = document.getElementById("targetResults");
-        list.innerHTML =
-          '<div class="flex justify-center py-10"><div class="spinner"></div></div>';
+        list.innerHTML = currentTargets
+  .map((p, i) => `
+    <div
+      class="target-card flex justify-between items-center p-3 bg-gray-800 rounded border border-gray-700 mb-2 cursor-pointer hover:border-green-500"
+      data-idx="${i}"
+    >
+      <div>
+        <div class="text-sm font-bold text-green-400">${p.short_name}</div>
+        <div class="text-xs text-gray-500">
+          Exp: ${p.contract_end} | ${fmtGBPFromEur(p.wage_yearly)}/yr
+        </div>
+      </div>
+      <div class="text-lg font-bold text-white">${p.overall}</div>
+    </div>
+  `)
+  .join("");
+
+  ;
+  
+
+
 
         try {
           const data = await safePost("/budget_target", {
@@ -1325,20 +1356,108 @@
         const ctx = document.getElementById("performanceChart").getContext("2d");
 
         currentChart = new Chart(ctx, {
-          type: "radar",
-          data: {
-            labels: ["PAC", "SHO", "PAS", "DRI", "DEF", "PHY"],
-            datasets: [
-              {
-                label: player.short_name || player.name || "Player",
-                data: data,
-                backgroundColor: "rgba(34,197,94,0.2)",
-                borderColor: "#22c55e",
-              },
-            ],
-          },
-          options: { scales: { r: { suggestedMin: 30, suggestedMax: 100 } } },
-        });
+  type: "radar",
+  data: {
+    labels: ["Pace", "Shooting", "Passing", "Dribbling", "Defending", "Physical"],
+    datasets: [{
+      label: player.short_name || "Player",
+      data,
+      fill: true,
+      borderWidth: 2,
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      tension: 0.2,
+      backgroundColor: "rgba(34,197,94,0.18)",
+      borderColor: "rgba(34,197,94,1)",
+      pointBackgroundColor: "rgba(34,197,94,1)"
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: {
+      legend: { labels: { color: "#c9d1d9" } },
+      tooltip: { enabled: true }
+    },
+    scales: {
+      r: {
+        suggestedMin: 30,
+        suggestedMax: 100,
+        grid: { color: "rgba(201,209,217,0.12)" },
+        angleLines: { color: "rgba(201,209,217,0.12)" },
+        pointLabels: { color: "#c9d1d9", font: { size: 12, weight: "600" } },
+        ticks: { color: "rgba(201,209,217,0.65)", backdropColor: "transparent" }
+      }
+    }
+  }
+});
+
+const proj = Array.isArray(player.projections) ? player.projections : [];
+const years = proj.map(p => `Y${p.year}`);
+const ovr = proj.map(p => Number(p.projected_overall || 0));
+const val = proj.map(p => Number(p.projected_value_eur || 0) / 1e6);
+
+if (projectionChart) projectionChart.destroy();
+const pctx = document.getElementById("projectionChart")?.getContext("2d");
+
+if (pctx && proj.length) {
+  projectionChart = new Chart(pctx, {
+    type: "line",
+    data: {
+      labels: years,
+      datasets: [
+        { label: "Projected Overall", data: ovr, yAxisID: "y1", tension: 0.3, borderWidth: 2 },
+        { label: "Projected Value (€M)", data: val, yAxisID: "y2", tension: 0.3, borderWidth: 2 }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { labels: { color: "#c9d1d9" } } },
+      scales: {
+        x: { ticks: { color: "#c9d1d9" }, grid: { color: "rgba(201,209,217,0.08)" } },
+        y1: { position: "left", ticks: { color: "#c9d1d9" }, grid: { color: "rgba(201,209,217,0.08)" } },
+        y2: { position: "right", ticks: { color: "#c9d1d9" }, grid: { drawOnChartArea: false } }
+      }
+    }
+  });
+}
+
+const bench = player.benchmarks || {};
+const avg = bench.avg || {};
+const elite = bench.elite || {};
+
+const keys = ["pace","shooting","passing","dribbling","defending","physic"];
+const labels = ["Pace","Shooting","Passing","Dribbling","Defending","Physical"];
+
+const playerVals = keys.map(k => Number(attrs?.[k] || 0));
+const avgVals = keys.map(k => Number(avg?.[k] || 0));
+const eliteVals = keys.map(k => Number(elite?.[k] || 0));
+
+if (benchmarkChart) benchmarkChart.destroy();
+const bctx = document.getElementById("benchmarkChart")?.getContext("2d");
+
+if (bctx) {
+  benchmarkChart = new Chart(bctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        { label: "Player", data: playerVals, borderWidth: 1 },
+        { label: "Pos Avg", data: avgVals, borderWidth: 1 },
+        { label: "Pos Elite", data: eliteVals, borderWidth: 1 }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { labels: { color: "#c9d1d9" } } },
+      scales: {
+        x: { ticks: { color: "#c9d1d9" }, grid: { color: "rgba(201,209,217,0.08)" } },
+        y: { ticks: { color: "#c9d1d9" }, grid: { color: "rgba(201,209,217,0.08)" }, suggestedMax: 100 }
+      }
+    }
+  });
+}
+
+        
 
         const entitlements = JSON.parse(
           sessionStorage.getItem("momentum_entitlements") || '{"analyst_ai":false}'
@@ -1676,6 +1795,22 @@
 
         detailedStatsTable = document.getElementById("detailedStatsTable");
         trainingRegime = document.getElementById("trainingRegime");
+
+        const targetBox = document.getElementById("targetResults");
+if (targetBox) {
+  targetBox.addEventListener("click", (e) => {
+    const card = e.target.closest(".target-card");
+    if (!card) return;
+
+    const idx = Number(card.dataset.idx);
+    const player = currentTargets?.[idx];
+    if (!player) return;
+
+    loadPlayerDetails(player);
+    switchTab("analytics");
+  });
+}
+
 
         // Safety checks
         if (!posSelect || !coreSliders || !recommendations) {

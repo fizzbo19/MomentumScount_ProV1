@@ -274,7 +274,11 @@ def safe_float(val, default=0.0):
         return default
 
 def clean_column_name(col_name):
-    return str(col_name).strip().lower().replace(" ", "_").replace(".", "").replace("%", "_pct")
+    s = str(col_name).strip().lower()
+    s = s.replace(" ", "_").replace(".", "").replace("%", "_pct")
+    s = s.replace("/", "_").replace("(", "").replace(")", "")
+    return s
+
 
 
 # ----------------------------------------------------
@@ -474,10 +478,14 @@ def project_player(row, years=3):
     return projections
 
 def _infer_position_col(df: pd.DataFrame) -> str:
-    for c in ["club_position", "position", "pos", "primary_position"]:
+    for c in [
+        "club_position", "position", "pos", "primary_position",
+        "player_position", "role", "positions"
+    ]:
         if c in df.columns:
             return c
     return ""
+
 
 def _normalize_positions(series: pd.Series) -> pd.Series:
     def _map_one(x):
@@ -532,6 +540,37 @@ def _archetype_from_gaps(position: str, weakest_attrs: list) -> str:
     if position == "GK":
         return "Shot-stopper GK (reflexes + handling)"
     return "Role Upgrade"
+
+def build_position_benchmarks(df: pd.DataFrame):
+    global POS_BENCHMARKS
+    POS_BENCHMARKS = {}
+
+    if df is None or df.empty or "club_position" not in df.columns:
+        return
+
+    core = ["pace", "shooting", "passing", "dribbling", "defending", "physic", "overall", "value_eur"]
+    for pos in POSITION_WEIGHTS.keys():
+        pool = df[df["club_position"].astype(str).str.upper() == pos]
+        if pool.empty:
+            continue
+
+        # elite = top 10% overall within position (fallback to full pool if missing)
+        elite = pool
+        if "overall" in pool.columns:
+            thr = float(pd.to_numeric(pool["overall"], errors="coerce").fillna(0).quantile(0.90))
+            elite = pool[pd.to_numeric(pool["overall"], errors="coerce").fillna(0) >= thr] or pool
+
+        def avg_of(frame):
+            out = {}
+            for k in core:
+                if k in frame.columns:
+                    out[k] = float(pd.to_numeric(frame[k], errors="coerce").fillna(0).mean())
+            return out
+
+        POS_BENCHMARKS[pos] = {
+            "avg": avg_of(pool),
+            "elite": avg_of(elite),
+        }
 
 
 # ----------------------------------------------------
@@ -629,6 +668,8 @@ def initialize_app():
     player_data_base = _load_fc26_data(DATA_FILENAME_BASE)
     player_data_baller = _load_baller_league_data(DATA_FILENAME_BALLER)
     next_match_data = _load_next_match_data(DATA_FILENAME_NEXT_MATCH)
+    build_position_benchmarks(player_data_base)
+
 
     print(f"📦 DATA_FOLDER_PATH = {DATA_FOLDER_PATH}", flush=True)
     print(f"📦 BASE rows={len(player_data_base) if player_data_base is not None else 'None'}", flush=True)
@@ -913,44 +954,83 @@ def api_squad_gap_analysis():
         ]
       }
     """
+@app.route("/api/squad_gap_analysis", methods=["POST", "OPTIONS"])
+def api_squad_gap_analysis():
+    # Preflight handled globally, but safe to keep:
+    if request.method == "OPTIONS":
+        return ("", 204)
+
     try:
         payload = request.get_json(silent=True) or {}
         csv_text = str(payload.get("csv_text") or "")
         scope_pos = str(payload.get("position") or "ALL").upper().strip()
+        club_style = str(payload.get("club_style") or "balanced").strip().lower()
+        age = safe_int(p.get("age", 23), 23)
+        projections = project_player(row, years_to_project(age))
+        bench = POS_BENCHMARKS.get(row_pos, POS_BENCHMARKS.get("CM", {}))
+
 
         if not csv_text.strip():
-            return jsonify({"success": False, "message": "csv_text is required.", "positions_found": [], "report": []}), 200
+            return jsonify({
+                "success": False,
+                "message": "csv_text is required.",
+                "positions_found": [],
+                "report": []
+            }), 200
 
-        # Parse CSV safely
+        # -----------------------------
+        # Parse CSV robustly
+        # -----------------------------
         try:
-            squad_df = pd.read_csv(StringIO(csv_text))
-        except Exception:
-            return jsonify({"success": False, "message": "Could not parse CSV. Please export a valid .csv file.", "positions_found": [], "report": []}), 200
+            csv_text_clean = csv_text.lstrip("\ufeff")  # remove UTF-8 BOM
+            squad_df = pd.read_csv(
+                StringIO(csv_text_clean),
+                sep=None,                # auto-detect delimiter
+                engine="python",
+                on_bad_lines="skip"      # skip malformed rows
+            )
+        except Exception as e:
+            return jsonify({
+                "success": False,
+                "message": f"Could not parse CSV: {str(e)}",
+                "positions_found": [],
+                "projections": projections,
+                "benchmarks": bench,
+                "projections": projections,
+                "benchmarks": bench,
+                "report": []
+            }), 200
 
         if squad_df is None or squad_df.empty:
-            return jsonify({"success": False, "message": "CSV is empty.", "positions_found": [], "report": []}), 200
+            return jsonify({
+                "success": False,
+                "message": "CSV is empty.",
+                "positions_found": [],
+                "report": []
+                
+            }), 200
 
         # Normalize column names
         squad_df.columns = [clean_column_name(c) for c in squad_df.columns]
 
         # Try to infer the squad position column
-        pos_col = _infer_position_col(squad_df)  # you already have this helper
-        if not pos_col:
-            # if no position column, we can still do "ALL" but can’t group
-            pos_col = ""
+        pos_col = _infer_position_col(squad_df) or ""
 
         # Normalize squad positions to your POSITION_WEIGHTS keys if possible
         if pos_col:
             squad_df[pos_col] = _normalize_positions(squad_df[pos_col])
 
         # Ensure numeric where possible (keep it forgiving)
-        for c in squad_df.columns:
-            if c in ["pace", "shooting", "passing", "dribbling", "defending", "physic",
-                     "overall", "potential", "age",
-                     "power_stamina", "power_strength",
-                     "mentality_vision", "mentality_interceptions",
-                     "defending_standing_tackle", "defending_marking_awareness",
-                     "attacking_finishing", "attacking_crossing"]:
+        numeric_cols = [
+            "pace", "shooting", "passing", "dribbling", "defending", "physic",
+            "overall", "potential", "age",
+            "power_stamina", "power_strength",
+            "mentality_vision", "mentality_interceptions",
+            "defending_standing_tackle", "defending_marking_awareness",
+            "attacking_finishing", "attacking_crossing",
+        ]
+        for c in numeric_cols:
+            if c in squad_df.columns:
                 squad_df[c] = pd.to_numeric(squad_df[c], errors="coerce").fillna(0)
 
         # Guard: DB loaded?
@@ -965,29 +1045,29 @@ def api_squad_gap_analysis():
         db = player_data_base.copy()
 
         # Find positions in squad file
-        positions_found = []
         if pos_col:
-            positions_found = sorted({str(x).upper() for x in squad_df[pos_col].dropna().unique() if str(x).strip()})
+            positions_found = sorted({
+                str(x).upper()
+                for x in squad_df[pos_col].dropna().unique()
+                if str(x).strip()
+            })
         else:
             positions_found = []
 
         # If a specific scope position requested, only analyze that
-        positions_to_analyze = []
         if scope_pos != "ALL":
             positions_to_analyze = [scope_pos]
         else:
-            # If squad positions exist, analyze each. Otherwise do a single "ALL" report as CM baseline.
             positions_to_analyze = positions_found if positions_found else ["CM"]
 
         # Helper: pick reliable stat keys for a position
         def _pos_keys(pos: str):
             pos = (pos or "CM").upper()
             weights = POSITION_WEIGHTS.get(pos, POSITION_WEIGHTS.get("CM", {}))
-            # Keep only keys that exist in both squad df and DB, otherwise gaps are meaningless
             keys = [k for k in weights.keys() if k in squad_df.columns and k in db.columns]
-            # If none exist, fall back to generic core attributes if present
             if not keys:
-                keys = [k for k in ["pace", "shooting", "passing", "dribbling", "defending", "physic"] if k in squad_df.columns and k in db.columns]
+                keys = [k for k in ["pace", "shooting", "passing", "dribbling", "defending", "physic"]
+                        if k in squad_df.columns and k in db.columns]
             return keys
 
         # Helper: compute a weighted score for a dataframe slice
@@ -995,14 +1075,12 @@ def api_squad_gap_analysis():
             keys = _pos_keys(pos)
             if not keys or df_slice is None or df_slice.empty:
                 return 0
+
             w = POSITION_WEIGHTS.get(pos, POSITION_WEIGHTS.get("CM", {}))
-            # Normalize weights to only keys we’re using
             w_used = {k: w.get(k, 10) for k in keys}
             total_w = sum(w_used.values()) or 1
 
-            avg = {}
-            for k in keys:
-                avg[k] = float(pd.to_numeric(df_slice[k], errors="coerce").fillna(0).mean())
+            avg = {k: float(pd.to_numeric(df_slice[k], errors="coerce").fillna(0).mean()) for k in keys}
 
             score = 0.0
             for k, weight in w_used.items():
@@ -1010,33 +1088,29 @@ def api_squad_gap_analysis():
 
             return int(max(0, min(100, round(score * 100))))
 
-        # Helper: choose an elite comparison group
+        # Helper: choose elite pool
         def _elite_pool_for_pos(pos: str) -> pd.DataFrame:
             pos = (pos or "CM").upper()
-            # If DB has club_position, filter to position group; otherwise use whole DB
             if "club_position" in db.columns:
                 pool = db[db["club_position"].astype(str).str.upper() == pos]
                 if len(pool) >= 200:
                     return pool
-                # fallback: use whole DB if position subset too small
             return db
 
-        # Helper: build target weights from top gaps (bigger gap => higher weight)
+        # Helper: weights from gaps
         def _weights_from_gaps(gaps_list):
-            weights = {}
+            out = {}
             for attr, squad_avg, elite_avg, gap in gaps_list:
                 try:
                     gap_num = float(gap)
                 except Exception:
-                    gap_num = 0
-                # turn gap into 0..100-ish desire weight
-                # bigger gaps => more importance in scoring targets
+                    gap_num = 0.0
                 w = int(max(0, min(100, round(gap_num * 4))))
                 if w > 0:
-                    weights[str(attr)] = w
-            return weights
+                    out[str(attr)] = w
+            return out
 
-        # Helper: JSON-safe dict
+        # JSON-safe
         def _json_safe(v):
             try:
                 if v is None:
@@ -1063,10 +1137,9 @@ def api_squad_gap_analysis():
         for pos in positions_to_analyze:
             pos = (pos or "CM").upper()
 
-            # Slice squad for this position if we can
+            # Slice squad by pos if possible
             if pos_col:
                 squad_slice = squad_df[squad_df[pos_col].astype(str).str.upper() == pos]
-                # If none, fallback to whole squad
                 if squad_slice.empty:
                     squad_slice = squad_df
             else:
@@ -1074,7 +1147,6 @@ def api_squad_gap_analysis():
 
             keys = _pos_keys(pos)
             if not keys:
-                # If we can’t compare anything, skip gracefully
                 report.append({
                     "position": pos,
                     "squad_score": 0,
@@ -1086,9 +1158,8 @@ def api_squad_gap_analysis():
                 })
                 continue
 
-            # Elite pool = top percentile group for stronger reference
             pool = _elite_pool_for_pos(pos)
-            # “Elite” definition: top 10% by overall (or momentum_score) if overall exists
+
             elite = pool
             if "overall" in pool.columns:
                 thr = float(pd.to_numeric(pool["overall"], errors="coerce").fillna(0).quantile(0.90))
@@ -1099,7 +1170,6 @@ def api_squad_gap_analysis():
             squad_score = _weighted_score(squad_slice, pos)
             elite_score = _weighted_score(elite, pos)
 
-            # Compute gaps (Elite avg - Squad avg)
             gaps = []
             for k in keys:
                 squad_avg = float(pd.to_numeric(squad_slice[k], errors="coerce").fillna(0).mean())
@@ -1107,33 +1177,24 @@ def api_squad_gap_analysis():
                 gap = round(elite_avg - squad_avg, 2)
                 gaps.append([k, int(round(squad_avg)), int(round(elite_avg)), gap])
 
-            # Biggest gaps first
             gaps.sort(key=lambda x: float(x[3]), reverse=True)
             top_gaps = gaps[:6]
-
             weakest_attrs = [g[0] for g in top_gaps[:3]]
-            archetype = _archetype_from_gaps(pos, weakest_attrs)  # you already have this
 
-            # Build “AI” reasoning (professional & intuitive)
+            archetype = _archetype_from_gaps(pos, weakest_attrs)
+
             reasoning = [
-                f"Benchmark: Elite reference group = top 10% of the global database (position-aware when possible).",
+                "Benchmark: Elite reference group = top 10% of the global database (position-aware when possible).",
                 f"Priority gaps are where your squad is furthest below elite averages for the {pos} role.",
                 f"Recommended archetype is derived from the 3 biggest gaps: {', '.join([a.replace('_',' ') for a in weakest_attrs])}."
             ]
 
-            # Use gap-derived weights to find targets (this is what makes it feel “AI-driven”)
             gap_weights = _weights_from_gaps(top_gaps)
 
-            # Pull targets from DB using your existing scoring engine
-            # We keep it safe and fast: filter by position if available, then score
             candidates = pool.copy()
-            # Add small constraints if your DB has age/value columns (optional)
             if "age" in candidates.columns:
                 candidates = candidates[pd.to_numeric(candidates["age"], errors="coerce").fillna(0) <= 32]
-            if "value_eur" in candidates.columns:
-                candidates = candidates[pd.to_numeric(candidates["value_eur"], errors="coerce").fillna(0) >= 0]
 
-            # Score using your compute_score_for_player
             try:
                 candidates["momentum_score"] = candidates.apply(
                     lambda r: compute_score_for_player(r, pos, gap_weights, is_baller=False),
@@ -1149,9 +1210,8 @@ def api_squad_gap_analysis():
                 p = _dict_safe(row.to_dict())
                 row_pos = (p.get("club_position") or pos or "CM")
 
-                # Include your advanced 5 panels if possible
                 try:
-                    fit = compute_fit_score(row, row_pos, payload.get("club_style", "balanced"))
+                    fit = compute_fit_score(row, row_pos, club_style)
                 except Exception:
                     fit = 0
 
@@ -1170,6 +1230,8 @@ def api_squad_gap_analysis():
                 except Exception:
                     deal = {"contract_end_year": safe_int(row.get("club_contract_valid_until_year"), 0)}
 
+                # IMPORTANT: keep similars light (or remove) to avoid timeouts
+                sims = []
                 try:
                     sims = find_similar_players(pool, row, top_n=3)
                 except Exception:
@@ -1182,8 +1244,6 @@ def api_squad_gap_analysis():
                     "value_eur": safe_int(p.get("value_eur", 0)),
                     "player_face_url": p.get("player_face_url", ""),
                     "full_attributes": p,
-
-                    # match other parts of your UI
                     "momentum_score": safe_float(p.get("momentum_score"), 0),
                     "fit_score": fit,
                     "momentum": mom,
@@ -1216,6 +1276,322 @@ def api_squad_gap_analysis():
             "positions_found": [],
             "report": []
         }), 200
+
+@app.route("/api/squad_gap_analysis", methods=["POST", "OPTIONS"])
+def api_squad_gap_analysis():
+    # Preflight
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    try:
+        payload = request.get_json(silent=True) or {}
+        csv_text = str(payload.get("csv_text") or "")
+        scope_pos = str(payload.get("position") or "ALL").upper().strip()
+        club_style = str(payload.get("club_style") or "balanced")
+
+        if not csv_text.strip():
+            return jsonify({
+                "success": False,
+                "message": "csv_text is required.",
+                "positions_found": [],
+                "report": []
+            }), 200
+
+        # ✅ Parse CSV robustly (handles ; , \t, BOM, odd quoting, broken lines)
+        try:
+            csv_text_clean = csv_text.lstrip("\ufeff")  # remove UTF-8 BOM if present
+            squad_df = pd.read_csv(
+                StringIO(csv_text_clean),
+                sep=None,               # auto-detect delimiter: comma/semicolon/tab
+                engine="python",
+                on_bad_lines="skip"     # skip malformed rows instead of failing
+            )
+        except Exception as e:
+            return jsonify({
+                "success": False,
+                "message": f"Could not parse CSV: {str(e)}",
+                "positions_found": [],
+                "report": []
+            }), 200
+
+        if squad_df is None or squad_df.empty:
+            return jsonify({
+                "success": False,
+                "message": "CSV is empty.",
+                "positions_found": [],
+                "report": []
+            }), 200
+
+        # Normalize column names
+        squad_df.columns = [clean_column_name(c) for c in squad_df.columns]
+
+        # Try to infer the squad position column
+        pos_col = _infer_position_col(squad_df)
+        if not pos_col:
+            pos_col = ""
+
+        # Normalize squad positions to your POSITION_WEIGHTS keys if possible
+        if pos_col:
+            squad_df[pos_col] = _normalize_positions(squad_df[pos_col])
+
+        # Ensure numeric where possible (keep it forgiving)
+        numeric_cols = {
+            "pace", "shooting", "passing", "dribbling", "defending", "physic",
+            "overall", "potential", "age",
+            "power_stamina", "power_strength",
+            "mentality_vision", "mentality_interceptions",
+            "defending_standing_tackle", "defending_marking_awareness",
+            "attacking_finishing", "attacking_crossing"
+        }
+        for c in squad_df.columns:
+            if c in numeric_cols:
+                squad_df[c] = pd.to_numeric(squad_df[c], errors="coerce").fillna(0)
+
+        # Guard: DB loaded?
+        if player_data_base is None or player_data_base.empty:
+            return jsonify({
+                "success": False,
+                "message": "Server database not loaded (FC26 CSV missing).",
+                "positions_found": [],
+                "report": []
+            }), 200
+
+        db = player_data_base.copy()
+
+        # Find positions in squad file
+        if pos_col:
+            positions_found = sorted({
+                str(x).upper()
+                for x in squad_df[pos_col].dropna().unique()
+                if str(x).strip()
+            })
+        else:
+            positions_found = []
+
+        # Decide positions to analyze
+        if scope_pos != "ALL":
+            positions_to_analyze = [scope_pos]
+        else:
+            positions_to_analyze = positions_found if positions_found else ["CM"]
+
+        # Helper: pick reliable stat keys for a position
+        def _pos_keys(pos: str):
+            pos = (pos or "CM").upper()
+            weights = POSITION_WEIGHTS.get(pos, POSITION_WEIGHTS.get("CM", {}))
+            keys = [k for k in weights.keys() if k in squad_df.columns and k in db.columns]
+            if not keys:
+                keys = [k for k in ["pace", "shooting", "passing", "dribbling", "defending", "physic"]
+                        if k in squad_df.columns and k in db.columns]
+            return keys
+
+        # Helper: compute weighted score for df slice
+        def _weighted_score(df_slice: pd.DataFrame, pos: str) -> int:
+            keys = _pos_keys(pos)
+            if not keys or df_slice is None or df_slice.empty:
+                return 0
+
+            w = POSITION_WEIGHTS.get(pos, POSITION_WEIGHTS.get("CM", {}))
+            w_used = {k: w.get(k, 10) for k in keys}
+            total_w = sum(w_used.values()) or 1
+
+            avg = {k: float(pd.to_numeric(df_slice[k], errors="coerce").fillna(0).mean()) for k in keys}
+
+            score = 0.0
+            for k, weight in w_used.items():
+                score += (avg[k] / 100.0) * (weight / total_w)
+
+            return int(max(0, min(100, round(score * 100))))
+
+        # Helper: elite pool for position
+        def _elite_pool_for_pos(pos: str) -> pd.DataFrame:
+            pos = (pos or "CM").upper()
+            if "club_position" in db.columns:
+                pool = db[db["club_position"].astype(str).str.upper() == pos]
+                if len(pool) >= 200:
+                    return pool
+            return db
+
+        # Helper: build target weights from top gaps
+        def _weights_from_gaps(gaps_list):
+            weights = {}
+            for attr, squad_avg, elite_avg, gap in gaps_list:
+                try:
+                    gap_num = float(gap)
+                except Exception:
+                    gap_num = 0
+                w = int(max(0, min(100, round(gap_num * 4))))
+                if w > 0:
+                    weights[str(attr)] = w
+            return weights
+
+        # JSON-safe dict
+        def _json_safe(v):
+            try:
+                if v is None:
+                    return 0
+                if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                    return 0
+                if pd.isna(v):
+                    return 0
+            except Exception:
+                pass
+            if isinstance(v, (np.integer,)):
+                return int(v)
+            if isinstance(v, (np.floating,)):
+                return float(v)
+            if isinstance(v, (np.bool_,)):
+                return bool(v)
+            return v
+
+        def _dict_safe(d):
+            return {k: _json_safe(v) for k, v in (d or {}).items()}
+
+        report = []
+
+        # ✅ MAIN LOOP (THIS IS THE PART THAT WAS GREYED OUT FOR YOU)
+        for pos in positions_to_analyze:
+            pos = (pos or "CM").upper()
+
+            # Slice squad for this position if we can
+            if pos_col:
+                squad_slice = squad_df[squad_df[pos_col].astype(str).str.upper() == pos]
+                if squad_slice.empty:
+                    squad_slice = squad_df
+            else:
+                squad_slice = squad_df
+
+            keys = _pos_keys(pos)
+            if not keys:
+                report.append({
+                    "position": pos,
+                    "squad_score": 0,
+                    "elite_score": 0,
+                    "archetype": f"{pos} upgrade profile",
+                    "gaps": [],
+                    "reasoning": ["No comparable stat columns found between your squad CSV and the server database."],
+                    "targets": []
+                })
+                continue
+
+            pool = _elite_pool_for_pos(pos)
+
+            elite = pool
+            if "overall" in pool.columns:
+                thr = float(pd.to_numeric(pool["overall"], errors="coerce").fillna(0).quantile(0.90))
+                elite = pool[pd.to_numeric(pool["overall"], errors="coerce").fillna(0) >= thr]
+                if elite.empty:
+                    elite = pool
+
+            squad_score = _weighted_score(squad_slice, pos)
+            elite_score = _weighted_score(elite, pos)
+
+            # Gaps: Elite avg - Squad avg
+            gaps = []
+            for k in keys:
+                squad_avg = float(pd.to_numeric(squad_slice[k], errors="coerce").fillna(0).mean())
+                elite_avg = float(pd.to_numeric(elite[k], errors="coerce").fillna(0).mean())
+                gap = round(elite_avg - squad_avg, 2)
+                gaps.append([k, int(round(squad_avg)), int(round(elite_avg)), gap])
+
+            gaps.sort(key=lambda x: float(x[3]), reverse=True)
+            top_gaps = gaps[:6]
+
+            weakest_attrs = [g[0] for g in top_gaps[:3]]
+            archetype = _archetype_from_gaps(pos, weakest_attrs)
+
+            reasoning = [
+                "Benchmark: Elite reference group = top 10% of the global database (position-aware when possible).",
+                f"Priority gaps are where your squad is furthest below elite averages for the {pos} role.",
+                f"Recommended archetype is derived from the 3 biggest gaps: {', '.join([a.replace('_',' ') for a in weakest_attrs])}."
+            ]
+
+            gap_weights = _weights_from_gaps(top_gaps)
+
+            candidates = pool.copy()
+            if "age" in candidates.columns:
+                candidates = candidates[pd.to_numeric(candidates["age"], errors="coerce").fillna(0) <= 32]
+
+            try:
+                candidates["momentum_score"] = candidates.apply(
+                    lambda r: compute_score_for_player(r, pos, gap_weights, is_baller=False),
+                    axis=1
+                )
+            except Exception:
+                candidates["momentum_score"] = 0
+
+            targets_df = candidates.sort_values("momentum_score", ascending=False).head(8)
+
+            targets = []
+            for _, row in targets_df.iterrows():
+                p = _dict_safe(row.to_dict())
+                row_pos = (p.get("club_position") or pos or "CM")
+
+                try:
+                    fit = compute_fit_score(row, row_pos, club_style)
+                except Exception:
+                    fit = 0
+
+                try:
+                    mom = compute_momentum_index(row)
+                except Exception:
+                    mom = {"score": 0, "label": "Unknown", "arrow": "flat"}
+
+                try:
+                    risk = compute_risk_profile(row)
+                except Exception:
+                    risk = {"injury_risk": 0, "contract_risk": 0, "wage_risk": 0, "ai_suggestions": []}
+
+                try:
+                    deal = compute_deal_intel(row)
+                except Exception:
+                    deal = {"contract_end_year": safe_int(row.get("club_contract_valid_until_year"), 0)}
+
+                # IMPORTANT: similars can be heavy; keep it small
+                try:
+                    sims = find_similar_players(pool, row, top_n=3)
+                except Exception:
+                    sims = []
+
+                targets.append({
+                    "short_name": p.get("short_name") or p.get("name") or "Unknown",
+                    "club_position": row_pos,
+                    "overall": safe_int(p.get("overall"), 0),
+                    "value_eur": safe_int(p.get("value_eur", 0)),
+                    "player_face_url": p.get("player_face_url", ""),
+                    "full_attributes": p,
+                    "momentum_score": safe_float(p.get("momentum_score"), 0),
+                    "fit_score": fit,
+                    "momentum": mom,
+                    "risk_profile": risk,
+                    "deal_intel": deal,
+                    "similar_players": sims,
+                })
+
+            report.append({
+                "position": pos,
+                "squad_score": int(squad_score),
+                "elite_score": int(elite_score),
+                "archetype": archetype,
+                "gaps": top_gaps,
+                "reasoning": reasoning,
+                "targets": targets,
+            })
+
+        return jsonify({
+            "success": True,
+            "positions_found": positions_found,
+            "report": report
+        }), 200
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "message": f"Server error: {str(e)}",
+            "positions_found": [],
+            "report": []
+        }), 200
+
 
 
 @app.route("/api/debug_fs", methods=["GET", "OPTIONS"])
@@ -1585,6 +1961,7 @@ def api_search_player():
             row_pos = p_dict.get("club_position") or row.get("club_position") or "CM"
 
             # existing analytics
+            bench = POS_BENCHMARKS.get(row_pos, POS_BENCHMARKS.get("CM", {}))
             score = compute_score_for_player(row, row_pos, None, is_baller)
             age = safe_int(row.get("age"), 21)
             projections = project_player(row, years_to_project(age))
@@ -1624,6 +2001,7 @@ def api_search_player():
                 "projections": projections,
                 "ai_training": tp,
                 "heatmap_zones": hm,
+                "benchmarks": bench,
                 "value_eur": safe_int(p_dict.get("value_eur")),
                 "full_attributes": p_dict,
 
@@ -1641,6 +2019,7 @@ def api_search_player():
         traceback.print_exc()
         resp = jsonify({"error": str(e)})
         resp.status_code = 500
+        
         return(resp)
 
 
@@ -1654,6 +2033,10 @@ def api_budget_target():
         max_wage = safe_int(payload.get("max_wage"), 500000)   # yearly wage cap
         contract_year = safe_int(payload.get("contract_year"), 2026)
         club_style = (payload.get("club_style") or "balanced").strip().lower()
+        age = safe_int(row.get("age"), 23)
+        projections = project_player(row, years_to_project(age))
+        bench = POS_BENCHMARKS.get(row_pos, POS_BENCHMARKS.get("CM", {}))
+
 
         # Guard: DB not loaded
         if player_data_base is None or player_data_base.empty:
@@ -1775,6 +2158,9 @@ def api_budget_target():
                 "value_eur": safe_int(full_stats.get("value_eur", 0)),
                 "wage_yearly": safe_int(full_stats.get("wage_yearly_calc", 0)),
                 "contract_end": safe_int(full_stats.get(year_col, 0)) if year_col else 0,
+                "projections": projections,
+                "benchmarks": bench,
+
 
                 # existing
                 "full_stats": full_stats,
