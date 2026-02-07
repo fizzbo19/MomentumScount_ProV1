@@ -897,7 +897,7 @@ def api_squad_gap_analysis():
       }
     """
     try:
-        payload = request.json or {}
+        payload = request.get_json(silent=True) or {}
         csv_text = str(payload.get("csv_text") or "")
         scope_pos = str(payload.get("position") or "ALL").upper().strip()
 
@@ -1278,7 +1278,7 @@ def api_sample_player():
 
 @app.route("/api/verify_login", methods=["POST"])
 def api_verify_login():
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
     code = str(data.get("code") or "").strip()
     portal = (data.get("portal") or "").strip()
@@ -1341,7 +1341,7 @@ def api_submit_demo():
 
 
     try:
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         full_name = (data.get("fullName") or "User").strip()
         user_email = (data.get("email") or "").strip().lower()
         org = (data.get("organization") or "N/A").strip()
@@ -1426,7 +1426,7 @@ def api_submit_demo():
 @app.route("/api/find_players", methods=["POST", "OPTIONS"])
 def api_find_players():
     try:
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
 
         is_baller = (data.get("data_source") == "baller")
         df = player_data_baller if is_baller else player_data_base
@@ -1538,8 +1538,12 @@ def api_find_players():
 
 @app.route("/api/search_player", methods=["POST", "OPTIONS"])
 def api_search_player():
+    # ✅ handle preflight safely
+    if request.method == "OPTIONS":
+        return ("", 204)
+
     try:
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}   # ✅ changed
         query = str(data.get("player_name", "")).lower().strip()
         is_baller = (data.get("data_source") == "baller")
 
@@ -1629,7 +1633,7 @@ def api_search_player():
 @app.route("/api/budget_target", methods=["POST", "OPTIONS"])
 def api_budget_target():
     try:
-        payload = request.json or {}
+        payload = request.get_json(silent=True) or {}
         max_wage = safe_int(payload.get("max_wage"), 500000)   # yearly wage cap
         contract_year = safe_int(payload.get("contract_year"), 2026)
         club_style = (payload.get("club_style") or "balanced").strip().lower()
