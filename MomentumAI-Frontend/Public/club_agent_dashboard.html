@@ -577,21 +577,41 @@
         return `£${(gbp / 1000).toFixed(0)}k`;
       }
 
+      
       async function safePost(endpoint, body) {
-        try {
-          const resp = await fetch(BACKEND_BASE + endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-            mode: "cors",
-          });
-          if (!resp.ok) throw new Error(`Backend Status ${resp.status}`);
-          return await resp.json();
-        } catch (err) {
-          console.error(err);
-          throw err;
-        }
-      }
+  const url = BACKEND_BASE + endpoint;
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+    },
+    body: JSON.stringify(body),
+    mode: "cors",
+
+    // ✅ ONLY enable this if you are using cookies / sessions
+    // credentials: "include",
+  });
+
+  // Try to read as text first (covers HTML errors, empty bodies, etc.)
+  const text = await resp.text();
+
+  if (!resp.ok) {
+    throw new Error(`Backend ${resp.status}: ${text.slice(0, 200)}`);
+  }
+
+  // If server returned empty, just return null
+  if (!text) return null;
+
+  // Parse JSON safely
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Invalid JSON from backend: ${text.slice(0, 200)}`);
+  }
+}
+
 
       /* --- TAB LOGIC --- */
       function switchTab(targetId) {

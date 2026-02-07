@@ -29,9 +29,10 @@ from flask_mail import Mail, Message
 # ----------------------------------------------------
 app = Flask(__name__, static_folder="public")
 
-
-def _norm_origin(o: str) -> str:
-    return (o or "").strip().lower().rstrip("/")
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS" and request.path.startswith("/api/"):
+        return ("", 204)
 
 def _norm_origin(o: str) -> str:
     return (o or "").strip().lower().rstrip("/")
@@ -62,6 +63,22 @@ CORS(
     methods=["GET", "POST", "OPTIONS"],
     max_age=86400,
 )
+
+@app.after_request
+def add_cors_headers(resp):
+    origin = request.headers.get("Origin")
+    norm = _norm_origin(origin)
+
+    if norm in ALLOWED_ORIGINS:
+        # echo the requesting origin (required when credentials=True)
+        resp.headers["Access-Control-Allow-Origin"] = origin.rstrip("/")
+        resp.headers["Vary"] = "Origin"
+        resp.headers["Access-Control-Allow-Credentials"] = "true"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+
+    return resp
+
 
 # IMPORTANT: make sure errors also return CORS headers
 @app.errorhandler(Exception)
