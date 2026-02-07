@@ -1518,7 +1518,7 @@ def api_find_players():
 
             # optional: similars (can be heavy, but fine for top-20)
             try:
-                similars = find_similar_players(df, row, top_n=5)
+                similars = [] #find_similar_players(df, row, top_n=5)
             except Exception:
                 similars = []
 
@@ -1613,7 +1613,7 @@ def api_search_player():
                 deal = {"contract_end_year": safe_int(row.get("club_contract_valid_until_year"), 0)}
 
             try:
-                similars = find_similar_players(df, row, top_n=5)
+                similars = [] #find_similar_players(df, row, top_n=5)
             except Exception:
                 similars = []
 
