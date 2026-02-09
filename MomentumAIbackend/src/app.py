@@ -23,16 +23,14 @@ import requests
 from flask_cors import CORS
 from flask import Flask, request, jsonify, send_from_directory, make_response
 from flask_mail import Mail, Message
+from werkzeug.exceptions import HTTPException
+
 
 # ----------------------------------------------------
 # APP INIT
 # ----------------------------------------------------
 app = Flask(__name__, static_folder="public")
 
-@app.before_request
-def handle_preflight():
-    if request.method == "OPTIONS" and request.path.startswith("/api/"):
-        return ("", 204)
 
 def _norm_origin(o: str) -> str:
     return (o or "").strip().lower().rstrip("/")
@@ -58,36 +56,26 @@ ALLOWED_ORIGINS = sorted({_norm_origin(o) for o in RAW_ALLOWED_ORIGINS if o})
 CORS(
     app,
     resources={r"/api/*": {"origins": ALLOWED_ORIGINS}},
-    supports_credentials=True,
+    supports_credentials=False,  # ✅ set True ONLY if using cookies/sessions
     allow_headers=["Content-Type", "Authorization"],
     methods=["GET", "POST", "OPTIONS"],
     max_age=86400,
 )
 
-@app.after_request
-def add_cors_headers(resp):
-    origin = request.headers.get("Origin")
-    norm = _norm_origin(origin)
 
-    if norm in ALLOWED_ORIGINS:
-        # echo the requesting origin (required when credentials=True)
-        resp.headers["Access-Control-Allow-Origin"] = origin.rstrip("/")
-        resp.headers["Vary"] = "Origin"
-        resp.headers["Access-Control-Allow-Credentials"] = "true"
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
 
-    return resp
 
 
 # IMPORTANT: make sure errors also return CORS headers
 @app.errorhandler(Exception)
 def handle_any_error(e):
+    # Keep real HTTP errors as-is (404, 405, 400, etc.)
+    if isinstance(e, HTTPException):
+        return jsonify({"success": False, "error": e.description}), e.code
+
     print("🔥 Unhandled error:", repr(e), flush=True)
     traceback.print_exc()
-    resp = jsonify({"success": False, "error": str(e)})
-    resp.status_code = 500
-    return resp
+    return jsonify({"success": False, "error": str(e)}), 500
 
 
 

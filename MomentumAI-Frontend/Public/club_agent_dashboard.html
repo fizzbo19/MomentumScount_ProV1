@@ -474,16 +474,6 @@
                       </button>
                     </div>
                   </div>
-                  
-              
-                <div class="bg-gray-900 p-3 rounded border border-gray-700">
-                  <div class="text-xs text-gray-400 mb-2 font-semibold">Compare vs Your Squad (same position)</div>
-                  <div class="flex gap-2">
-                    <select id="compareSquadSelect" class="value-input"></select>
-                    <button id="compareSquadBtn" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded font-bold text-white">Compare</button>
-                  </div>
-                </div>
-              </div>
               
             </h2>
             <button
@@ -1435,10 +1425,13 @@ document.getElementById("compareSquadBtn")?.addEventListener("click", () => {
 
       function pickStat(attrs, keys, fallback = 50) {
         for (const k of keys) {
-          const v = attrs?.[k];
-          if (typeof v === "number" && !Number.isNaN(v)) return v;
+            const v = attrs?.[k];
+            const n = Number(v);
+            if (!Number.isNaN(n) && n !== 0) return n;
         }
-        function overlayComparison(comparePlayer, tag) {
+    return fallback;
+}
+function overlayComparison(comparePlayer, tag) {
   if (!currentPrimaryPlayer) return alert("Load a primary player first.");
 
   const b = comparePlayer.full_attributes || {};
@@ -1490,15 +1483,10 @@ document.getElementById("compareSquadBtn")?.addEventListener("click", () => {
   }
 
   // Projection chart overlay (only if compare has projections)
-  if (
-    projectionChart &&
-    Array.isArray(comparePlayer.projections) &&
-    comparePlayer.projections.length
-  ) {
+  if (projectionChart && Array.isArray(comparePlayer.projections) && comparePlayer.projections.length) {
     const ovr = comparePlayer.projections.map((p) => Number(p.projected_overall || 0));
     const val = comparePlayer.projections.map((p) => Number(p.projected_value_eur || 0) / 1e6);
 
-    // remove old projection overlays for same tag (optional tidy)
     projectionChart.data.datasets = projectionChart.data.datasets.filter(
       (ds) => !String(ds.label || "").includes(`(${tag})`)
     );
@@ -1513,9 +1501,7 @@ document.getElementById("compareSquadBtn")?.addEventListener("click", () => {
 
   document.getElementById("analyticsHeader").textContent = "Player Head-to-Head Comparison";
 }
-
-        return fallback;
-      }
+      
 
       /* =========================
          ✅ UPDATED: loadPlayerDetails
