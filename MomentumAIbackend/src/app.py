@@ -543,36 +543,63 @@ def _archetype_from_gaps(position: str, weakest_attrs: list) -> str:
         return "Shot-stopper GK (reflexes + handling)"
     return "Role Upgrade"
 
+
+        # elite = top 10% overall within position (fallback to full pool if missing)
 def build_position_benchmarks(df: pd.DataFrame):
+    """
+    Pre-compute average and elite benchmarks per position.
+    Used by squad gap analysis and player analytics.
+    """
     global POS_BENCHMARKS
     POS_BENCHMARKS = {}
 
     if df is None or df.empty or "club_position" not in df.columns:
         return
 
-    core = ["pace", "shooting", "passing", "dribbling", "defending", "physic", "overall", "value_eur"]
+    core = [
+        "pace", "shooting", "passing", "dribbling",
+        "defending", "physic", "overall", "value_eur"
+    ]
+
     for pos in POSITION_WEIGHTS.keys():
         pool = df[df["club_position"].astype(str).str.upper() == pos]
+
         if pool.empty:
             continue
 
-        # elite = top 10% overall within position (fallback to full pool if missing)
+        # -----------------------------
+        # Elite = top 10% by overall
+        # -----------------------------
         elite = pool
         if "overall" in pool.columns:
-            thr = float(pd.to_numeric(pool["overall"], errors="coerce").fillna(0).quantile(0.90))
-            elite = pool[pd.to_numeric(pool["overall"], errors="coerce").fillna(0) >= thr] or pool
+            overall_num = pd.to_numeric(pool["overall"], errors="coerce").fillna(0)
+            thr = float(overall_num.quantile(0.90))
 
-        def avg_of(frame):
+            elite_candidate = pool[overall_num >= thr]
+            elite = elite_candidate if not elite_candidate.empty else pool
+
+        # -----------------------------
+        # Helper to compute averages
+        # -----------------------------
+        def avg_of(frame: pd.DataFrame):
             out = {}
             for k in core:
                 if k in frame.columns:
-                    out[k] = float(pd.to_numeric(frame[k], errors="coerce").fillna(0).mean())
+                    out[k] = float(
+                        pd.to_numeric(frame[k], errors="coerce")
+                        .fillna(0)
+                        .mean()
+                    )
             return out
 
+        # -----------------------------
+        # Store benchmarks
+        # -----------------------------
         POS_BENCHMARKS[pos] = {
             "avg": avg_of(pool),
             "elite": avg_of(elite),
         }
+
 
 
 # ----------------------------------------------------
@@ -966,15 +993,13 @@ def api_squad_gap_analysisv2():
             )
         except Exception as e:
             return jsonify({
-                "success": False,
-                "message": f"Could not parse CSV: {str(e)}",
-                "positions_found": [],
-                "projections": projections,
-                "benchmarks": bench,
-                "projections": projections,
-                "benchmarks": bench,
-                "report": []
-            }), 200
+                    "success": False,
+                    "message": f"Could not parse CSV: {str(e)}",
+                    "positions_found": [],
+                    "report": []
+                    }), 200
+
+                
 
         if squad_df is None or squad_df.empty:
             return jsonify({
@@ -1143,15 +1168,17 @@ def api_squad_gap_analysisv2():
 
             elite = pool
             if "overall" in pool.columns:
-                thr = float(pd.to_numeric(pool["overall"], errors="coerce").fillna(0).quantile(0.90))
-                elite = pool[pd.to_numeric(pool["overall"], errors="coerce").fillna(0) >= thr]
-                if elite.empty:
-                    elite = pool
+                overall_num = pd.to_numeric(pool["overall"], errors="coerce").fillna(0)
+                thr = float(overall_num.quantile(0.90))
 
-            squad_score = _weighted_score(squad_slice, pos)
-            elite_score = _weighted_score(elite, pos)
+                elite_candidate = pool[overall_num >= thr]
+                elite = elite_candidate if not elite_candidate.empty else pool
 
-            gaps = []
+
+                squad_score = _weighted_score(squad_slice, pos)
+                elite_score = _weighted_score(elite, pos)
+
+                gaps = []
             for k in keys:
                 squad_avg = float(pd.to_numeric(squad_slice[k], errors="coerce").fillna(0).mean())
                 elite_avg = float(pd.to_numeric(elite[k], errors="coerce").fillna(0).mean())
@@ -1187,14 +1214,15 @@ def api_squad_gap_analysisv2():
             targets_df = candidates.sort_values("momentum_score", ascending=False).head(8)
 
             targets = []
+            
             for _, row in targets_df.iterrows():
                 p = _dict_safe(row.to_dict())
                 row_pos = (p.get("club_position") or pos or "CM")
-                    # ✅ Player-level extras (DEFINED HERE because row/p/row_pos exist here)
-                age = safe_int(p.get("age", row.get("age", 23)), 23)
+
+                # ✅ Player-level extras (row/p/row_pos exist here)
+                age = safe_int(p.get("age", 23), 23)
                 projections = project_player(row, years=years_to_project(age))
                 bench = POS_BENCHMARKS.get(row_pos, POS_BENCHMARKS.get("CM", {}))
-
 
                 try:
                     fit = compute_fit_score(row, row_pos, club_style)
@@ -1216,29 +1244,28 @@ def api_squad_gap_analysisv2():
                 except Exception:
                     deal = {"contract_end_year": safe_int(row.get("club_contract_valid_until_year"), 0)}
 
-                # IMPORTANT: keep similars light (or remove) to avoid timeouts
-                sims = []
                 try:
                     sims = find_similar_players(pool, row, top_n=3)
                 except Exception:
                     sims = []
 
                 targets.append({
-                    "short_name": p.get("short_name") or p.get("name") or "Unknown",
-                    "club_position": row_pos,
-                    "overall": safe_int(p.get("overall"), 0),
-                    "value_eur": safe_int(p.get("value_eur", 0)),
-                    "player_face_url": p.get("player_face_url", ""),
-                    "full_attributes": p,
-                    "projections": projections,
-                    "benchmarks": bench,
-                    "momentum_score": safe_float(p.get("momentum_score"), 0),
-                    "fit_score": fit,
-                    "momentum": mom,
-                    "risk_profile": risk,
-                    "deal_intel": deal,
-                    "similar_players": sims,
+                     "short_name": p.get("short_name") or p.get("name") or "Unknown",
+                     "club_position": row_pos,
+                     "overall": safe_int(p.get("overall"), 0),
+                     "value_eur": safe_int(p.get("value_eur", 0)),
+                     "player_face_url": p.get("player_face_url", ""),
+                     "full_attributes": p,
+                     "projections": projections,
+                     "benchmarks": bench,
+                     "momentum_score": safe_float(p.get("momentum_score"), 0),
+                     "fit_score": fit,
+                     "momentum": mom,
+                     "risk_profile": risk,
+                     "deal_intel": deal,
+                     "similar_players": sims,
                 })
+
 
             report.append({
                 "position": pos,
@@ -1697,20 +1724,21 @@ def api_search_player():
 
 
 
-
 @app.route("/api/budget_target", methods=["POST", "OPTIONS"])
 def api_budget_target():
+    # Preflight handled globally, but safe to keep:
+    if request.method == "OPTIONS":
+        return ("", 204)
+
     try:
         payload = request.get_json(silent=True) or {}
         max_wage = safe_int(payload.get("max_wage"), 500000)   # yearly wage cap
         contract_year = safe_int(payload.get("contract_year"), 2026)
         club_style = (payload.get("club_style") or "balanced").strip().lower()
-        age = safe_int(row.get("age"), 23)
-        projections = project_player(row, years_to_project(age))
-        bench = POS_BENCHMARKS.get(row_pos, POS_BENCHMARKS.get("CM", {}))
 
-
+        # -----------------------------
         # Guard: DB not loaded
+        # -----------------------------
         if player_data_base is None or player_data_base.empty:
             return jsonify({"targets": [], "error": "Database not loaded"}), 200
 
@@ -1734,16 +1762,22 @@ def api_budget_target():
             return v
 
         def dict_json_safe(d):
-            return {k: json_safe(v) for k, v in d.items()}
+            return {k: json_safe(v) for k, v in (d or {}).items()}
 
         # -----------------------------
         # Locate columns
         # -----------------------------
-        wage_col = next((c for c in ("wage_eur", "wage", "wage_weekly", "wage_yearly") if c in df.columns), None)
+        wage_col = next(
+            (c for c in ("wage_eur", "wage", "wage_weekly", "wage_yearly") if c in df.columns),
+            None
+        )
         if not wage_col:
             return jsonify({"targets": [], "error": "Wage column not found in DB"}), 200
 
-        year_col = next((c for c in ("club_contract_valid_until_year", "contract_valid_until", "contract_end") if c in df.columns), None)
+        year_col = next(
+            (c for c in ("club_contract_valid_until_year", "contract_valid_until", "contract_end") if c in df.columns),
+            None
+        )
         if year_col:
             df[year_col] = pd.to_numeric(df[year_col], errors="coerce").fillna(0).astype(int)
 
@@ -1771,11 +1805,15 @@ def api_budget_target():
         # -----------------------------
         df["overall"] = pd.to_numeric(df.get("overall", 0), errors="coerce").fillna(0).astype(int)
 
-        # optional: compute momentum_score for better ranking context
-        # (cheap and helps your demo)
+        # optional: compute momentum_score for ranking context
         try:
             df["momentum_score"] = df.apply(
-                lambda r: compute_score_for_player(r, (r.get("club_position") if pos_col else "CM") or "CM", None, False),
+                lambda r: compute_score_for_player(
+                    r,
+                    (r.get("club_position") if pos_col else "CM") or "CM",
+                    None,
+                    False
+                ),
                 axis=1,
             )
         except Exception:
@@ -1791,6 +1829,11 @@ def api_budget_target():
             full_stats = dict_json_safe(row.to_dict())
             row_pos = (full_stats.get("club_position") or "CM") if pos_col else "CM"
 
+            # ✅ projections + benchmarks MUST be computed inside loop (row exists here)
+            age = safe_int(full_stats.get("age", 23), 23)
+            projections = project_player(row, years=years_to_project(age))
+            bench = POS_BENCHMARKS.get(row_pos, POS_BENCHMARKS.get("CM", {}))
+
             # ✅ NEW 5 sections (safe defaults)
             try:
                 fit = compute_fit_score(row, row_pos, club_style)
@@ -1800,12 +1843,16 @@ def api_budget_target():
             try:
                 momentum = compute_momentum_index(row)
             except Exception:
-                momentum = {"score": safe_float(full_stats.get("momentum_score"), 0), "label": "Unknown", "arrow": "flat"}
+                momentum = {
+                    "score": safe_float(full_stats.get("momentum_score"), 0),
+                    "label": "Unknown",
+                    "arrow": "flat",
+                }
 
             try:
                 risk = compute_risk_profile(row)
             except Exception:
-                risk = {"injury_risk": 0, "notes": [], "ai_suggestion": ""}
+                risk = {"injury_risk": 0, "contract_risk": 0, "wage_risk": 0, "ai_suggestions": []}
 
             try:
                 deal = compute_deal_intel(row)
@@ -1816,8 +1863,7 @@ def api_budget_target():
                     "ai_note": "",
                 }
 
-            # similars are optional here (budget targets list can be “heavy”)
-            # if you want it, keep it light:
+            # similars optional (can be heavy)
             try:
                 similars = find_similar_players(df, row, top_n=3)
             except Exception:
@@ -1830,14 +1876,15 @@ def api_budget_target():
                 "value_eur": safe_int(full_stats.get("value_eur", 0)),
                 "wage_yearly": safe_int(full_stats.get("wage_yearly_calc", 0)),
                 "contract_end": safe_int(full_stats.get(year_col, 0)) if year_col else 0,
+
+                # ✅ charts data
                 "projections": projections,
                 "benchmarks": bench,
-
 
                 # existing
                 "full_stats": full_stats,
 
-                # ✅ added fields
+                # added fields
                 "momentum_score": safe_float(full_stats.get("momentum_score"), 0),
                 "fit_score": fit,
                 "momentum": momentum,
@@ -1852,7 +1899,8 @@ def api_budget_target():
         traceback.print_exc()
         resp = jsonify({"error": str(e)})
         resp.status_code = 500
-        return (resp)
+        return resp
+
 
 
 

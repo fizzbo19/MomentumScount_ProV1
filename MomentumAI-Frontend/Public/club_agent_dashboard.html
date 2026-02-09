@@ -12,6 +12,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Chart.js for Analytics Tab -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
 
     <style>
       body {
@@ -137,7 +139,7 @@
       }
       .chart-container {
         position: relative;
-        height: 300px;
+        height: 360px;
         width: 100%;
       }
     </style>
@@ -454,6 +456,35 @@
               id="analyticsHeader"
             >
               Player Analytics
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div class="bg-gray-900 p-3 rounded border border-gray-700">
+                  <div class="text-xs text-gray-400 mb-2 font-semibold">Compare vs Database Player</div>
+                  <div class="flex gap-2">
+                    <input id="compareDbInput" class="value-input" placeholder="Type player name..." />
+                    <button id="compareDbBtn" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded font-bold text-white">Compare</button>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                    <div class="bg-gray-900 border border-gray-700 rounded-lg p-3">
+                      <div class="text-xs text-gray-400 mb-1">Compare with Squad Player (same position)</div>
+                      <select id="compareSquadSelect" class="value-input"></select>
+                      <button id="compareSquadBtn" class="mt-2 w-full py-2 bg-yellow-600 hover:bg-yellow-700 rounded text-white font-bold">
+                        Compare vs Squad
+                      </button>
+                    </div>
+                  </div>
+                  
+              
+                <div class="bg-gray-900 p-3 rounded border border-gray-700">
+                  <div class="text-xs text-gray-400 mb-2 font-semibold">Compare vs Your Squad (same position)</div>
+                  <div class="flex gap-2">
+                    <select id="compareSquadSelect" class="value-input"></select>
+                    <button id="compareSquadBtn" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded font-bold text-white">Compare</button>
+                  </div>
+                </div>
+              </div>
+              
             </h2>
             <button
               id="backToScouting"
@@ -465,35 +496,30 @@
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div class="md:col-span-2 space-y-6">
-              <div
-                class="bg-gray-900 p-4 rounded-lg border border-gray-600 chart-container"
-              >
+              <div class="bg-gray-900 p-4 rounded-lg border border-gray-600 chart-container">
                 <canvas id="performanceChart"></canvas>
               </div>
-              <div
-                id="detailedStatsTable"
-                class="bg-gray-900 p-4 rounded-lg border border-gray-600 max-h-96 overflow-y-auto"
-              ></div>
+              <div id="detailedStatsTable" class="bg-gray-900 p-4 rounded-lg border border-gray-600 max-h-96 overflow-y-auto"></div>
             </div>
-
-            <div class="bg-gray-900 p-4 rounded-lg border border-gray-600 chart-container">
+          
+            <div class="md:col-span-1 space-y-6">
+              <div class="bg-gray-900 p-4 rounded-lg border border-gray-600 chart-container">
                 <canvas id="projectionChart"></canvas>
               </div>
-              
+          
               <div class="bg-gray-900 p-4 rounded-lg border border-gray-600 chart-container">
                 <canvas id="benchmarkChart"></canvas>
               </div>
-              
-
-            <div class="md:col-span-1 space-y-4">
-              <h3 class="text-lg font-bold text-green-400">
-                MomentumAI Reports
-              </h3>
-
-              <div id="trainingRegime" class="space-y-4"></div>
-
-              <!-- ✅ NEW: Advanced Insights panel (5 extra features live here) -->
-              <div id="advancedInsights" class="space-y-4"></div>
+          
+              <div>
+                <h3 class="text-lg font-bold text-green-400">MomentumAI Reports</h3>
+                <div id="trainingRegime" class="space-y-4"></div>
+                <div id="advancedInsights" class="space-y-4"></div>
+                ...
+              </div>
+            </div>
+          </div>
+          
 
               <button
                 id="exportPdfBtn"
@@ -520,7 +546,11 @@
       const DEFAULT_VALUE_MAX = 50000000;
       let currentChart = null;
       let currentTargets = [];
-      let lastSquadTargets = {}; // { "CB": [playerObj, ...], ... }
+      let lastSquadTargets = {};// { "CB": [playerObj, ...], ... }
+      let squadPlayersParsed = []; // array of row objects from uploaded CSV
+      let currentPrimaryPlayer = null;  
+      let projectionChart = null;
+      let benchmarkChart = null;
 
       /* ------------- GLOBAL ELEMENTS ------------- */
       let posSelect,
@@ -545,13 +575,36 @@
         squadPositionSelect;
 
       let detailedStatsTable, trainingRegime;
-      let projectionChart = null;
-      let benchmarkChart = null;
+      
 
 
       /* =========================
          ✅ NEW HELPERS (safe add)
          ========================= */
+
+         function chartTheme(titleText) {
+            return {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                 legend: { labels: { color: "#c9d1d9" } },
+                title: {
+                 display: true,
+                 text: titleText,
+                 color: "#c9d1d9",
+                 font: { size: 14, weight: "700" },
+                padding: { top: 8, bottom: 8 }
+      }
+    },
+    scales: {
+      x: { ticks: { color: "#c9d1d9" }, grid: { color: "rgba(201,209,217,0.08)" } },
+      y: { ticks: { color: "#c9d1d9" }, grid: { color: "rgba(201,209,217,0.08)" } }
+    }
+  };
+}
+
+
+
       function meterHTML(label, val, bandText = "") {
         const v = Math.max(0, Math.min(100, Number(val || 0)));
         const band = bandText
@@ -983,6 +1036,39 @@
         document.getElementById("exportPdfBtn").onclick = handleExportPDF;
 
         posSelect.onchange = updateUIAfterPositionChange;
+        // ✅ Compare DB player
+document.getElementById("compareDbBtn")?.addEventListener("click", async () => {
+  const q = document.getElementById("compareDbInput")?.value?.trim();
+  if (!q) return;
+
+  try {
+    const hits = await safePost("/search_player", { player_name: q });
+    const cmp = Array.isArray(hits) && hits[0] ? hits[0] : null;
+    if (!cmp) return alert("No database match found.");
+    overlayComparison(cmp, "Database");
+  } catch (e) {
+    alert(String(e?.message || e));
+  }
+});
+
+// ✅ Compare squad player
+document.getElementById("compareSquadBtn")?.addEventListener("click", () => {
+  const idx = Number(document.getElementById("compareSquadSelect")?.value);
+  const r = squadPlayersParsed?.[idx];
+  if (!r) return alert("No squad player selected.");
+
+  // convert squad row -> player-like object
+  const cmp = {
+    short_name: r.short_name || r.name || r.player || "Squad Player",
+    club_position: r.club_position || r.position || r.pos || "CM",
+    full_attributes: r,
+    projections: [], // squad csv usually won’t have projections
+    benchmarks: currentPrimaryPlayer?.benchmarks || {}
+  };
+
+  overlayComparison(cmp, "Squad");
+});
+
       }
 
       /* --- SQUAD CSV UPLOAD --- */
@@ -997,10 +1083,34 @@
           const reader = new FileReader();
           reader.onload = () => {
             squadCsvText = String(reader.result || "");
+            try {
+                const csv_clean = squadCsvText.lstrip ? squadCsvText.lstrip("\ufeff") : squadCsvText.replace(/^\uFEFF/, "");
+                const rows = Papa.parse(csv_clean, { header: true, skipEmptyLines: true }).data;
+                squadPlayersParsed = rows.map(r => ({
+                 ...r,
+                 // normalize common keys so your filter works
+                short_name: r.short_name || r.name || r.player || r.Player || r.Name || "",
+                club_position: r.club_position || r.position || r.pos || r.Position || "",
+         }));
+        } catch (e) {
+            squadPlayersParsed = [];
+        }
+
             const box = document.getElementById("gapAnalysisResults");
             box.innerHTML = `<div class="text-green-400">✅ Squad file loaded. Choose scope and run analysis.</div>`;
           };
           reader.readAsText(file);
+          try {
+         const parsed = Papa.parse(squadCsvText, { header: true, skipEmptyLines: true });
+            squadPlayersParsed = (parsed.data || []).map(r => {
+         const out = {};
+            Object.keys(r || {}).forEach(k => out[k ? k.trim().toLowerCase().replace(/\s+/g,"_") : k] = r[k]);
+         return out;
+         });
+        } catch (e) {
+            squadPlayersParsed = [];
+}
+
         });
 
       async function handleSquadAnalysis() {
@@ -1131,9 +1241,13 @@
             })
             .join("");
         } catch (err) {
-          console.error(err);
-          box.innerHTML = `<div class="text-red-400">Error connecting to server.</div>`;
-        }
+  console.error(err);
+  box.innerHTML = `<div class="text-red-400">
+    Error connecting to server.<br>
+    <span class="text-xs text-gray-400">${String(err?.message || err)}</span>
+  </div>`;
+}
+
       }
 
       /* --- DATA HANDLERS --- */
@@ -1287,10 +1401,13 @@
             )
             .join("");
         } catch (err) {
-          console.error("Targeting Error:", err);
-          list.innerHTML =
-            '<p class="text-red-500 text-center mt-10">Error connecting to scouting server.</p>';
-        }
+  console.error("Targeting Error:", err);
+  list.innerHTML = `<p class="text-red-500 text-center mt-10">
+    Error connecting to scouting server.<br>
+    <span class="text-xs text-gray-400">${String(err?.message || err)}</span>
+  </p>`;
+}
+
       }
 
       function renderPlayerCard(player) {
@@ -1321,6 +1438,82 @@
           const v = attrs?.[k];
           if (typeof v === "number" && !Number.isNaN(v)) return v;
         }
+        function overlayComparison(comparePlayer, tag) {
+  if (!currentPrimaryPlayer) return alert("Load a primary player first.");
+
+  const b = comparePlayer.full_attributes || {};
+
+  // Radar overlay
+  if (currentChart) {
+    const compData = [
+      pickStat(b, ["pace", "pac"]),
+      pickStat(b, ["shooting", "sho"]),
+      pickStat(b, ["passing", "pas"]),
+      pickStat(b, ["dribbling", "dri"]),
+      pickStat(b, ["defending", "defence", "def"]),
+      pickStat(b, ["physic", "physicality", "phy"]),
+    ];
+
+    // remove old comparison from same tag (optional tidy)
+    currentChart.data.datasets = currentChart.data.datasets.filter(
+      (ds) => !String(ds.label || "").includes(`(${tag})`)
+    );
+
+    currentChart.data.datasets.push({
+      label: `${comparePlayer.short_name || "Compare"} (${tag})`,
+      data: compData,
+      borderWidth: 2,
+      pointRadius: 3,
+      fill: false,
+    });
+
+    currentChart.update();
+  }
+
+  // Benchmark bar chart overlay
+  if (benchmarkChart) {
+    const keys = ["pace", "shooting", "passing", "dribbling", "defending", "physic"];
+    const compVals = keys.map((k) => Number(b?.[k] || 0));
+
+    // remove old comparison dataset for same tag (optional tidy)
+    benchmarkChart.data.datasets = benchmarkChart.data.datasets.filter(
+      (ds) => !String(ds.label || "").includes(`Compare (${tag})`)
+    );
+
+    benchmarkChart.data.datasets.push({
+      label: `Compare (${tag})`,
+      data: compVals,
+      borderWidth: 1,
+    });
+
+    benchmarkChart.update();
+  }
+
+  // Projection chart overlay (only if compare has projections)
+  if (
+    projectionChart &&
+    Array.isArray(comparePlayer.projections) &&
+    comparePlayer.projections.length
+  ) {
+    const ovr = comparePlayer.projections.map((p) => Number(p.projected_overall || 0));
+    const val = comparePlayer.projections.map((p) => Number(p.projected_value_eur || 0) / 1e6);
+
+    // remove old projection overlays for same tag (optional tidy)
+    projectionChart.data.datasets = projectionChart.data.datasets.filter(
+      (ds) => !String(ds.label || "").includes(`(${tag})`)
+    );
+
+    projectionChart.data.datasets.push(
+      { label: `Compare OVR (${tag})`, data: ovr, yAxisID: "y1", tension: 0.3, borderWidth: 2 },
+      { label: `Compare Value (€M) (${tag})`, data: val, yAxisID: "y2", tension: 0.3, borderWidth: 2 }
+    );
+
+    projectionChart.update();
+  }
+
+  document.getElementById("analyticsHeader").textContent = "Player Head-to-Head Comparison";
+}
+
         return fallback;
       }
 
@@ -1329,6 +1522,7 @@
          (adds 5 extra features safely)
          ========================= */
       function loadPlayerDetails(player) {
+        currentPrimaryPlayer = player;
         const insightsBox = document.getElementById("advancedInsights");
         if (insightsBox) insightsBox.innerHTML = "";
 
@@ -1356,39 +1550,42 @@
         const ctx = document.getElementById("performanceChart").getContext("2d");
 
         currentChart = new Chart(ctx, {
-  type: "radar",
-  data: {
-    labels: ["Pace", "Shooting", "Passing", "Dribbling", "Defending", "Physical"],
-    datasets: [{
-      label: player.short_name || "Player",
-      data,
-      fill: true,
-      borderWidth: 2,
-      pointRadius: 3,
-      pointHoverRadius: 5,
-      tension: 0.2,
-      backgroundColor: "rgba(34,197,94,0.18)",
-      borderColor: "rgba(34,197,94,1)",
-      pointBackgroundColor: "rgba(34,197,94,1)"
+        type: "radar",
+        data: {
+        labels: ["Pace", "Shooting", "Passing", "Dribbling", "Defending", "Physical"],
+        datasets: [{
+        label: player.short_name || "Player",
+        data,
+        fill: true,
+        borderWidth: 2,
+        pointRadius: 3,
+        pointHoverRadius: 5,
+        tension: 0.2,
+        backgroundColor: "rgba(34,197,94,0.18)",
+        borderColor: "rgba(34,197,94,1)",
+        pointBackgroundColor: "rgba(34,197,94,1)"
     }]
   },
   options: {
     responsive: true,
+    maintainAspectRatio: false,
     plugins: {
-      legend: { labels: { color: "#c9d1d9" } },
-      tooltip: { enabled: true }
-    },
-    scales: {
-      r: {
-        suggestedMin: 30,
-        suggestedMax: 100,
-        grid: { color: "rgba(201,209,217,0.12)" },
-        angleLines: { color: "rgba(201,209,217,0.12)" },
-        pointLabels: { color: "#c9d1d9", font: { size: 12, weight: "600" } },
-        ticks: { color: "rgba(201,209,217,0.65)", backdropColor: "transparent" }
-      }
+        legend: { labels: { color: "#c9d1d9" } },
+        title: { display: true, text: "Attribute Radar", color: "#c9d1d9" },
+        tooltip: { enabled: true }
+  },
+  scales: {
+    r: {
+      suggestedMin: 30,
+      suggestedMax: 100,
+      grid: { color: "rgba(201,209,217,0.12)" },
+      angleLines: { color: "rgba(201,209,217,0.12)" },
+      pointLabels: { color: "#c9d1d9", font: { size: 12, weight: "600" } },
+      ticks: { color: "rgba(201,209,217,0.65)", backdropColor: "transparent" }
     }
   }
+}
+
 });
 
 const proj = Array.isArray(player.projections) ? player.projections : [];
@@ -1410,14 +1607,14 @@ if (pctx && proj.length) {
       ]
     },
     options: {
-      responsive: true,
-      plugins: { legend: { labels: { color: "#c9d1d9" } } },
-      scales: {
+        ...chartTheme("Development Projection (Overall + Value)"),
+    scales: {
         x: { ticks: { color: "#c9d1d9" }, grid: { color: "rgba(201,209,217,0.08)" } },
         y1: { position: "left", ticks: { color: "#c9d1d9" }, grid: { color: "rgba(201,209,217,0.08)" } },
         y2: { position: "right", ticks: { color: "#c9d1d9" }, grid: { drawOnChartArea: false } }
-      }
-    }
+  }
+}
+
   });
 }
 
@@ -1447,7 +1644,7 @@ if (bctx) {
       ]
     },
     options: {
-      responsive: true,
+        ...chartTheme("Position Benchmark Comparison"),
       plugins: { legend: { labels: { color: "#c9d1d9" } } },
       scales: {
         x: { ticks: { color: "#c9d1d9" }, grid: { color: "rgba(201,209,217,0.08)" } },
@@ -1575,7 +1772,29 @@ if (bctx) {
             </div>
           `;
         }
+        // ✅ Populate squad dropdown (place RIGHT HERE)
+            const squadSel = document.getElementById("compareSquadSelect");
+        if (squadSel) {
+          const pos = String(player.club_position || "").toUpperCase();
+          const list = (squadPlayersParsed || [])
+            .filter(r =>
+              String(r.club_position || r.position || r.pos || "")
+                .toUpperCase()
+                .includes(pos)
+            )
+            .slice(0, 200);
 
+          squadSel.innerHTML = list.length
+            ? list
+                .map(
+                  (r, i) =>
+                    `<option value="${i}">${
+                      r.short_name || r.name || r.player || "Squad Player"
+                    }</option>`
+                )
+                .join("")
+            : `<option value="">No squad players found for ${pos}</option>`;
+        }
         switchTab("analytics");
       }
 
@@ -1845,6 +2064,42 @@ if (targetBox) {
           setupEventListeners();
           handleLoadSavedTargets();
           checkPremiumStatus();
+          const compareBtn = document.getElementById("compareSquadBtn");
+if (compareBtn) {
+  compareBtn.onclick = () => {
+    const sel = document.getElementById("compareSquadSelect");
+    const idx = sel ? Number(sel.value) : NaN;
+    const squadP = squadPlayersParsed?.[idx];
+    if (!currentPrimaryPlayer || !squadP) return alert("Select a squad player first.");
+
+    // overlay squad player onto radar chart
+    const stats = squadP;
+    const comparisonData = [
+      Number(stats.pace || stats.pac || 50),
+      Number(stats.shooting || stats.sho || 50),
+      Number(stats.passing || stats.pas || 50),
+      Number(stats.dribbling || stats.dri || 50),
+      Number(stats.defending || stats.def || 50),
+      Number(stats.physic || stats.phy || 50),
+    ];
+
+    if (currentChart) {
+      // remove old squad overlay if present
+      currentChart.data.datasets = currentChart.data.datasets.filter(ds => !String(ds.label || "").includes("(Squad)"));
+
+      currentChart.data.datasets.push({
+        label: `${squadP.short_name || "Squad Player"} (Squad)`,
+        data: comparisonData,
+        borderWidth: 2,
+        fill: false
+      });
+
+      currentChart.update();
+      document.getElementById("analyticsHeader").textContent = "Player vs Squad Comparison";
+    }
+  };
+}
+
         } catch (e) {
           console.error("❌ Bootstrap failed:", e);
         }
