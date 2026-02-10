@@ -64,7 +64,31 @@ CORS(
 
 
 
+@app.before_request
+def preflight():
+    # Handle preflight for ANY /api route
+    if request.method == "OPTIONS" and request.path.startswith("/api/"):
+        return make_response("", 204)
 
+@app.after_request
+def add_cors_headers(resp):
+    origin = request.headers.get("Origin")
+    if origin and _norm_origin(origin) in ALLOWED_ORIGINS:
+        resp.headers["Access-Control-Allow-Origin"] = origin.rstrip("/")
+        resp.headers["Vary"] = "Origin"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return resp
+
+@app.errorhandler(Exception)
+def handle_any_error(e):
+    # Don’t turn real HTTP errors into 500s
+    if isinstance(e, HTTPException):
+        return jsonify({"success": False, "error": e.description}), e.code
+
+    print("🔥 Unhandled error:", repr(e), flush=True)
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
 
 # IMPORTANT: make sure errors also return CORS headers
 @app.errorhandler(Exception)
