@@ -32,10 +32,10 @@ from werkzeug.exceptions import HTTPException
 app = Flask(__name__, static_folder="public")
 
 
+# required imports (ensure these are at file top)
+# --- Allowed origins (your existing list) ---
 def _norm_origin(o: str) -> str:
     return (o or "").strip().lower().rstrip("/")
-
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://momentumscout.netlify.app")
 
 RAW_ALLOWED_ORIGINS = {
     FRONTEND_URL,
@@ -51,57 +51,55 @@ RAW_ALLOWED_ORIGINS = {
     "http://localhost:5500",
     "http://127.0.0.1:5500",
 }
-ALLOWED_ORIGINS = sorted({_norm_origin(o) for o in RAW_ALLOWED_ORIGINS if o})
+ALLOWED_ORIGINS = { _norm_origin(o) for o in RAW_ALLOWED_ORIGINS if o }
 
-
-
-# Enable CORS for API routes
-CORS(
-    app,
-    resources={r"/api/*": {"origins": ALLOWED_ORIGINS}},
-    supports_credentials=False,  # True only if you use cookies/sessions
-    allow_headers=["Content-Type", "Authorization"],
-    methods=["GET", "POST", "OPTIONS"],
-    max_age=86400,
-)
-
+# --- GLOBAL PRE-FLIGHT HANDLER (return Flask Response object) ---
 @app.before_request
-def preflight():
-    # Handle preflight for ANY /api route
+def handle_preflight():
     if request.method == "OPTIONS" and request.path.startswith("/api/"):
-        return make_response("", 204)
-    
-@app.before_request
-def preflight():
-    # Handle preflight for ANY /api route
-    if request.method == "OPTIONS" and request.path.startswith("/api/"):
-        return make_response("", 204)
+        # Make sure this returns a Flask response object (not a tuple)
+        resp = make_response("", 204)
+        # echo the origin if allowed (helps some clients)
+        origin = request.headers.get("Origin")
+        if origin and _norm_origin(origin) in ALLOWED_ORIGINS:
+            resp.headers["Access-Control-Allow-Origin"] = origin.rstrip("/")
+            resp.headers["Vary"] = "Origin"
+            resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+            resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        return resp
 
-
+# --- AFTER REQUEST: ALWAYS echo Access-Control-Allow-Origin when appropriate ---
 @app.after_request
 def add_cors_headers(resp):
     origin = request.headers.get("Origin")
-    if origin and _norm_origin(origin) in ALLOWED_ORIGINS and request.path.startswith("/api/"):
+    # Only echo origins we trust — don't use '*' if you use credentials
+    if origin and _norm_origin(origin) in ALLOWED_ORIGINS:
         resp.headers["Access-Control-Allow-Origin"] = origin.rstrip("/")
         resp.headers["Vary"] = "Origin"
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
         resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        # If your frontend ever needs to send cookies / auth, uncomment:
+        # resp.headers["Access-Control-Allow-Credentials"] = "true"
+        # If you need your JS to read non-simple headers, expose them here:
+        # resp.headers["Access-Control-Expose-Headers"] = "X-My-Header, Another-Header"
     return resp
 
-
+# --- SINGLE error handler that returns a proper Response AND will have CORS headers added ---
 @app.errorhandler(Exception)
 def handle_any_error(e):
-    # Keep real HTTP errors as-is (404, 405, 400, etc.)
+    # If it's a native HTTPException (404, 400 etc) keep its code/description
     if isinstance(e, HTTPException):
         resp = jsonify({"success": False, "error": e.description})
         resp.status_code = e.code
         return resp
 
+    # For unexpected exceptions, return 500 + log
     print("🔥 Unhandled error:", repr(e), flush=True)
     traceback.print_exc()
     resp = jsonify({"success": False, "error": str(e)})
     resp.status_code = 500
     return resp
+
 
 # ----------------------------------------------------
 # EMAIL CONFIG (OPTIONAL; NEVER BREAK API)
