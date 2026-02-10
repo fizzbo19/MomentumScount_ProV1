@@ -53,16 +53,17 @@ RAW_ALLOWED_ORIGINS = {
 }
 ALLOWED_ORIGINS = sorted({_norm_origin(o) for o in RAW_ALLOWED_ORIGINS if o})
 
+
+
+# Enable CORS for API routes
 CORS(
     app,
     resources={r"/api/*": {"origins": ALLOWED_ORIGINS}},
-    supports_credentials=False,  # ✅ set True ONLY if using cookies/sessions
+    supports_credentials=False,  # True only if you use cookies/sessions
     allow_headers=["Content-Type", "Authorization"],
     methods=["GET", "POST", "OPTIONS"],
     max_age=86400,
 )
-
-
 
 @app.before_request
 def preflight():
@@ -82,26 +83,17 @@ def add_cors_headers(resp):
 
 @app.errorhandler(Exception)
 def handle_any_error(e):
-    # Don’t turn real HTTP errors into 500s
-    if isinstance(e, HTTPException):
-        return jsonify({"success": False, "error": e.description}), e.code
-
-    print("🔥 Unhandled error:", repr(e), flush=True)
-    traceback.print_exc()
-    return jsonify({"success": False, "error": str(e)}), 500
-
-# IMPORTANT: make sure errors also return CORS headers
-@app.errorhandler(Exception)
-def handle_any_error(e):
     # Keep real HTTP errors as-is (404, 405, 400, etc.)
     if isinstance(e, HTTPException):
-        return jsonify({"success": False, "error": e.description}), e.code
+        resp = jsonify({"success": False, "error": e.description})
+        resp.status_code = e.code
+        return resp
 
     print("🔥 Unhandled error:", repr(e), flush=True)
     traceback.print_exc()
-    return jsonify({"success": False, "error": str(e)}), 500
-
-
+    resp = jsonify({"success": False, "error": str(e)})
+    resp.status_code = 500
+    return resp
 
 # ----------------------------------------------------
 # EMAIL CONFIG (OPTIONAL; NEVER BREAK API)
@@ -1178,24 +1170,28 @@ def api_squad_gap_analysisv2():
 
             pool = _elite_pool_for_pos(pos)
 
+            # --- Elite pool (top 10% by overall if possible) ---
             elite = pool
             if "overall" in pool.columns:
                 overall_num = pd.to_numeric(pool["overall"], errors="coerce").fillna(0)
                 thr = float(overall_num.quantile(0.90))
 
                 elite_candidate = pool[overall_num >= thr]
-                elite = elite_candidate if not elite_candidate.empty else pool
+                if not elite_candidate.empty:
+                    elite = elite_candidate
 
+            # --- Scores (must always run) ---
+            squad_score = _weighted_score(squad_slice, pos)
+            elite_score = _weighted_score(elite, pos)
 
-                squad_score = _weighted_score(squad_slice, pos)
-                elite_score = _weighted_score(elite, pos)
-
-                gaps = []
+            # --- Gaps (must always run) ---
+            gaps = []
             for k in keys:
                 squad_avg = float(pd.to_numeric(squad_slice[k], errors="coerce").fillna(0).mean())
                 elite_avg = float(pd.to_numeric(elite[k], errors="coerce").fillna(0).mean())
                 gap = round(elite_avg - squad_avg, 2)
                 gaps.append([k, int(round(squad_avg)), int(round(elite_avg)), gap])
+
 
             gaps.sort(key=lambda x: float(x[3]), reverse=True)
             top_gaps = gaps[:6]
