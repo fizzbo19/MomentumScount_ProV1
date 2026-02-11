@@ -20,7 +20,6 @@ import math
 import numpy as np
 import pandas as pd
 import requests
-from flask_cors import CORS
 from flask import Flask, request, jsonify, send_from_directory, make_response
 from flask_mail import Mail, Message
 from werkzeug.exceptions import HTTPException
