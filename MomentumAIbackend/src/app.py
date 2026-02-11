@@ -53,8 +53,11 @@ ALLOWED_ORIGINS = {_norm_origin(o) for o in ALLOWED_ORIGINS if o}
 # ----------------------------------------------------
 # ROBUST CORS HANDLER
 # ----------------------------------------------------
+# ----------------------------------------------------
+# ROBUST CORS HANDLER
+# ----------------------------------------------------
 @app.after_request
-def _add_cors_headers(resp):
+def add_cors_headers(resp):
     origin = request.headers.get("Origin")
     if origin:
         norm = _norm_origin(origin)
@@ -62,30 +65,40 @@ def _add_cors_headers(resp):
             resp.headers["Access-Control-Allow-Origin"] = origin
             resp.headers["Vary"] = "Origin"
             resp.headers["Access-Control-Allow-Credentials"] = "true"
-            resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept"
+            req_headers = request.headers.get("Access-Control-Request-Headers")
+            resp.headers["Access-Control-Allow-Headers"] = req_headers or "Content-Type, Authorization, Accept"
             resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return resp
 
-@app.before_request
-def handle_options():
-    if request.method == "OPTIONS":
-        return make_response("", 204)
+# ✅ catch-all OPTIONS under /api so preflight ALWAYS gets CORS headers
+@app.route("/api/<path:any_path>", methods=["OPTIONS"])
+def any_options(any_path):
+    return make_response("", 204)
+
+# ❌ REMOVE this (don’t keep both)
+# @app.before_request
+# def handle_options():
+#     if request.method == "OPTIONS":
+#         return make_response("", 204)
+
+
 
 @app.errorhandler(Exception)
 def handle_global_error(e):
-    # Log the real error to Render terminal
     print("🔥 Backend Error Detected:", str(e))
     traceback.print_exc()
-    
+
     code = 500
     if isinstance(e, HTTPException):
         code = e.code
-    
-    return jsonify({
+
+    resp = make_response(jsonify({
         "success": False,
         "error": str(e),
         "message": "Internal Server Error - Check logs"
-    }), code
+    }), code)
+    return resp
+
 
 
 # ----------------------------------------------------
@@ -963,13 +976,13 @@ def api_squad_gap_analysisv2():
 
     try:
         payload = request.get_json(silent=True) or {}
-        csv_text = payload.get("csv_text") or payload.get("csv_data") 
+        csv_text = payload.get("csv_text") or payload.get("csv_data") or ""
         scope_pos = str(payload.get("position") or "ALL").upper().strip()
         club_style = str(payload.get("club_style") or "balanced").strip().lower()
        
 
 
-        if not csv_text.strip():
+        if not str(csv_text).strip():
             return jsonify({
                 "success": False,
                 "message": "csv_text is required.",
@@ -1333,11 +1346,7 @@ def api_debug_fs():
 
 
 
-# ✅ ADD THIS RIGHT AFTER debug_fs
-@app.route("/api/<path:any_path>", methods=["OPTIONS"])
-def any_options(any_path):
-    resp = make_response("", 204)
-    return _add_cors_headers(resp)
+
 
 @app.route("/api/cors_debug", methods=["GET", "OPTIONS"])
 def api_cors_debug():
