@@ -34,11 +34,11 @@ app = Flask(__name__, static_folder="public")
 def _norm_origin(o: str) -> str:
     return (o or "").strip().lower().rstrip("/")
 
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://momentumscout.netlify.app")
+# ---------------- CORS (KNOWN WORKING) ----------------
+FRONTEND_URL = (os.environ.get("FRONTEND_URL", "https://momentumscout.netlify.app") or "").rstrip("/")
 
-RAW_ALLOWED_ORIGINS = {
+ALLOWED_ORIGINS = {
     FRONTEND_URL,
-    os.environ.get("FRONTEND_URL_ALT", "https://momentum-ai-io.netlify.app"),
     "https://momentumscout.netlify.app",
     "https://momentum-ai-io.netlify.app",
     "https://momentumscout.com",
@@ -50,39 +50,35 @@ RAW_ALLOWED_ORIGINS = {
     "http://localhost:5500",
     "http://127.0.0.1:5500",
 }
+ALLOWED_ORIGINS = {o for o in ALLOWED_ORIGINS if o and isinstance(o, str)}
 
-ALLOWED_ORIGINS = sorted({_norm_origin(o) for o in RAW_ALLOWED_ORIGINS if o})
-
-# --- GLOBAL PRE-FLIGHT HANDLER (return Flask Response object) ---
-@app.before_request
-def handle_preflight():
-    if request.method == "OPTIONS" and request.path.startswith("/api/"):
-        # Make sure this returns a Flask response object (not a tuple)
-        resp = make_response("", 204)
-        # echo the origin if allowed (helps some clients)
-        origin = request.headers.get("Origin")
-        if origin and _norm_origin(origin) in ALLOWED_ORIGINS:
-            resp.headers["Access-Control-Allow-Origin"] = origin.rstrip("/")
-            resp.headers["Vary"] = "Origin"
-            resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-            resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        return resp
-
-# --- AFTER REQUEST: ALWAYS echo Access-Control-Allow-Origin when appropriate ---
-@app.after_request
-def add_cors_headers(resp):
+def _cors_origin():
     origin = request.headers.get("Origin")
-    # Only echo origins we trust — don't use '*' if you use credentials
-    if origin and _norm_origin(origin) in ALLOWED_ORIGINS:
-        resp.headers["Access-Control-Allow-Origin"] = origin.rstrip("/")
+    if origin:
+        origin = origin.rstrip("/")
+    if origin and origin in {o.rstrip("/") for o in ALLOWED_ORIGINS}:
+        return origin
+    return None
+
+def _add_cors_headers(resp):
+    origin = _cors_origin()
+    if origin:
+        resp.headers["Access-Control-Allow-Origin"] = origin
         resp.headers["Vary"] = "Origin"
-        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        # If your frontend ever needs to send cookies / auth, uncomment:
-        # resp.headers["Access-Control-Allow-Credentials"] = "true"
-        # If you need your JS to read non-simple headers, expose them here:
-        # resp.headers["Access-Control-Expose-Headers"] = "X-My-Header, Another-Header"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return resp
+
+@app.before_request
+def cors_preflight():
+    if request.method == "OPTIONS":
+        resp = make_response("", 204)
+        return _add_cors_headers(resp)
+
+@app.after_request
+def cors_after(resp):
+    return _add_cors_headers(resp)
+# ------------------------------------------------------
 
 # --- SINGLE error handler that returns a proper Response AND will have CORS headers added ---
 @app.errorhandler(Exception)
@@ -152,7 +148,7 @@ def _send_emails_bg(app, internal_msg, customer_msg):
 # ----------------------------------------------------
 @app.route("/api/ping", methods=["GET", "OPTIONS"])
 def api_ping():
-    return(jsonify({"ok": True}))
+    return jsonify({"ok": True}), 200
 
 
 
