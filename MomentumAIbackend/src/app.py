@@ -24,7 +24,6 @@ from flask import Flask, request, jsonify, send_from_directory, make_response
 from flask_mail import Mail, Message
 from werkzeug.exceptions import HTTPException
 
-
 # ----------------------------------------------------
 # APP INIT
 # ----------------------------------------------------
@@ -49,52 +48,44 @@ ALLOWED_ORIGINS = {
     "http://127.0.0.1:5500",
 }
 
-# ✅ normalize the allowlist ONCE
 ALLOWED_ORIGINS = {_norm_origin(o) for o in ALLOWED_ORIGINS if o}
 
-def _cors_origin():
-    raw = request.headers.get("Origin") or ""
-    norm = _norm_origin(raw)
-    if norm and norm in ALLOWED_ORIGINS:
-        return raw.rstrip("/")  # return the raw origin for the header
-    return None
-
+# ----------------------------------------------------
+# ROBUST CORS HANDLER
+# ----------------------------------------------------
+@app.after_request
 def _add_cors_headers(resp):
-    origin = _cors_origin()
+    origin = request.headers.get("Origin")
     if origin:
-        resp.headers["Access-Control-Allow-Origin"] = origin
-        resp.headers["Vary"] = "Origin"
-        # ✅ allow whatever headers the browser asks for
-        req_headers = request.headers.get("Access-Control-Request-Headers")
-        resp.headers["Access-Control-Allow-Headers"] = req_headers or "Content-Type, Authorization"
-        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        norm = _norm_origin(origin)
+        if norm in ALLOWED_ORIGINS:
+            resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers["Vary"] = "Origin"
+            resp.headers["Access-Control-Allow-Credentials"] = "true"
+            resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept"
+            resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return resp
 
 @app.before_request
-def cors_preflight():
+def handle_options():
     if request.method == "OPTIONS":
-        resp = make_response("", 204)
-        return _add_cors_headers(resp)
+        return make_response("", 204)
 
-@app.after_request
-def cors_after(resp):
-    return _add_cors_headers(resp)
-
-# ------------------------------------------------------
-
-# --- SINGLE error handler that returns a proper Response AND will have CORS headers added ---
 @app.errorhandler(Exception)
-def handle_any_error(e):
-    if isinstance(e, HTTPException):
-        resp = jsonify({"success": False, "error": e.description})
-        resp.status_code = e.code
-        return cors_after(resp)  # ✅ force CORS
-
-    print("🔥 Unhandled error:", repr(e), flush=True)
+def handle_global_error(e):
+    # Log the real error to Render terminal
+    print("🔥 Backend Error Detected:", str(e))
     traceback.print_exc()
-    resp = jsonify({"success": False, "error": str(e)})
-    resp.status_code = 500
-    return cors_after(resp)  # ✅ force CORS
+    
+    code = 500
+    if isinstance(e, HTTPException):
+        code = e.code
+    
+    return jsonify({
+        "success": False,
+        "error": str(e),
+        "message": "Internal Server Error - Check logs"
+    }), code
 
 
 # ----------------------------------------------------
@@ -160,10 +151,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # 2. Try several common locations for the 'data' folder relative to app.py
 potential_paths = [
-    os.path.join(BASE_DIR, 'data'),          # data/ is inside src/
-    os.path.join(BASE_DIR, '..', 'data'),    # data/ is next to src/
-    os.path.join(os.getcwd(), 'data'),       # data/ is in the current working dir
-    os.path.join(os.getcwd(), '..', 'data')  # data/ is one level up from working dir
+    os.path.join(BASE_DIR, 'data'),
+    os.path.join(BASE_DIR, '..', 'data'),
+    os.path.join(os.getcwd(), 'data'),
+    "/opt/render/project/src/pro_version/MomentumAIbackend/data",
+    "/opt/render/project/src/data"
 ]
 
 DATA_FOLDER_PATH = None
@@ -971,7 +963,7 @@ def api_squad_gap_analysisv2():
 
     try:
         payload = request.get_json(silent=True) or {}
-        csv_text = str(payload.get("csv_text") or "")
+        csv_text = payload.get("csv_text") or payload.get("csv_data") 
         scope_pos = str(payload.get("position") or "ALL").upper().strip()
         club_style = str(payload.get("club_style") or "balanced").strip().lower()
        
@@ -1342,6 +1334,11 @@ def api_debug_fs():
 
 
 # ✅ ADD THIS RIGHT AFTER debug_fs
+@app.route("/api/<path:any_path>", methods=["OPTIONS"])
+def any_options(any_path):
+    resp = make_response("", 204)
+    return _add_cors_headers(resp)
+
 @app.route("/api/cors_debug", methods=["GET", "OPTIONS"])
 def api_cors_debug():
     return (jsonify({
