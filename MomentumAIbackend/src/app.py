@@ -33,8 +33,7 @@ app = Flask(__name__, static_folder="public")
 def _norm_origin(o: str) -> str:
     return (o or "").strip().lower().rstrip("/")
 
-# ---------------- CORS (KNOWN WORKING) ----------------
-FRONTEND_URL = (os.environ.get("FRONTEND_URL", "https://momentumscout.netlify.app") or "").rstrip("/")
+FRONTEND_URL = _norm_origin(os.environ.get("FRONTEND_URL", "https://momentumscout.netlify.app"))
 
 ALLOWED_ORIGINS = {
     FRONTEND_URL,
@@ -49,14 +48,15 @@ ALLOWED_ORIGINS = {
     "http://localhost:5500",
     "http://127.0.0.1:5500",
 }
-ALLOWED_ORIGINS = {o for o in ALLOWED_ORIGINS if o and isinstance(o, str)}
+
+# ✅ normalize the allowlist ONCE
+ALLOWED_ORIGINS = {_norm_origin(o) for o in ALLOWED_ORIGINS if o}
 
 def _cors_origin():
-    origin = request.headers.get("Origin")
-    if origin:
-        origin = origin.rstrip("/")
-    if origin and origin in {o.rstrip("/") for o in ALLOWED_ORIGINS}:
-        return origin
+    raw = request.headers.get("Origin") or ""
+    norm = _norm_origin(raw)
+    if norm and norm in ALLOWED_ORIGINS:
+        return raw.rstrip("/")  # return the raw origin for the header
     return None
 
 def _add_cors_headers(resp):
@@ -64,7 +64,9 @@ def _add_cors_headers(resp):
     if origin:
         resp.headers["Access-Control-Allow-Origin"] = origin
         resp.headers["Vary"] = "Origin"
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        # ✅ allow whatever headers the browser asks for
+        req_headers = request.headers.get("Access-Control-Request-Headers")
+        resp.headers["Access-Control-Allow-Headers"] = req_headers or "Content-Type, Authorization"
         resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return resp
 
@@ -77,23 +79,22 @@ def cors_preflight():
 @app.after_request
 def cors_after(resp):
     return _add_cors_headers(resp)
+
 # ------------------------------------------------------
 
 # --- SINGLE error handler that returns a proper Response AND will have CORS headers added ---
 @app.errorhandler(Exception)
 def handle_any_error(e):
-    # If it's a native HTTPException (404, 400 etc) keep its code/description
     if isinstance(e, HTTPException):
         resp = jsonify({"success": False, "error": e.description})
         resp.status_code = e.code
-        return resp
+        return cors_after(resp)  # ✅ force CORS
 
-    # For unexpected exceptions, return 500 + log
     print("🔥 Unhandled error:", repr(e), flush=True)
     traceback.print_exc()
     resp = jsonify({"success": False, "error": str(e)})
     resp.status_code = 500
-    return resp
+    return cors_after(resp)  # ✅ force CORS
 
 
 # ----------------------------------------------------
