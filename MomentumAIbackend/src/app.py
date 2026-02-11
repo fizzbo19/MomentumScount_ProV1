@@ -31,11 +31,10 @@ from werkzeug.exceptions import HTTPException
 # ----------------------------------------------------
 app = Flask(__name__, static_folder="public")
 
-
-# required imports (ensure these are at file top)
-# --- Allowed origins (your existing list) ---
 def _norm_origin(o: str) -> str:
     return (o or "").strip().lower().rstrip("/")
+
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://momentumscout.netlify.app")
 
 RAW_ALLOWED_ORIGINS = {
     FRONTEND_URL,
@@ -51,7 +50,8 @@ RAW_ALLOWED_ORIGINS = {
     "http://localhost:5500",
     "http://127.0.0.1:5500",
 }
-ALLOWED_ORIGINS = { _norm_origin(o) for o in RAW_ALLOWED_ORIGINS if o }
+
+ALLOWED_ORIGINS = sorted({_norm_origin(o) for o in RAW_ALLOWED_ORIGINS if o})
 
 # --- GLOBAL PRE-FLIGHT HANDLER (return Flask Response object) ---
 @app.before_request
