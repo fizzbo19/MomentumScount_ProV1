@@ -636,9 +636,9 @@
       async function safePost(endpoint, body) {
     // Standardize the endpoint: remove leading slash if it exists
     const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
-    const url = `${BACKEND_BASE}/${cleanEndpoint}`;
+    const url = `${BACKEND_BASE}/${cleanEndpoint}/`;
 
-    console.log("🚀 Calling API:", url); // This helps you debug in the console (F12)
+    cconsole.log("🚀 Calling API (with trailing slash):", url); // This helps you debug in the console (F12)
 
     try {
         const resp = await fetch(url, {

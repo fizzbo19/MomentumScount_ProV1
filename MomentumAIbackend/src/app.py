@@ -58,7 +58,8 @@ ALLOWED_ORIGINS = {_norm_origin(o) for o in ALLOWED_ORIGINS if o}
 # ROBUST CORS HANDLER
 # ----------------------------------------------------
 
-CORS(app, resources={r"/api/*": {"origins": list(ALLOWED_ORIGINS)}}, supports_credentials=True)
+# Change this line in app.py
+CORS(app, resources={r"/*": {"origins": list(ALLOWED_ORIGINS)}}, supports_credentials=True)
 
 # ❌ REMOVE this (don’t keep both)
 # @app.before_request
@@ -956,7 +957,7 @@ def find_similar_players(df, row, top_n=5):
 def health():
     return(jsonify({"status": "online"}))
 
-@app.route("/api/squad_gap_analysis", methods=["POST", "OPTIONS"])
+@app.route("/api/squad_gap_analysis/", methods=["POST", "OPTIONS"])
 def api_squad_gap_analysis():
     # Preflight handled globally, but safe to keep:
     
@@ -1728,7 +1729,7 @@ def api_search_player():
 
 
 
-@app.route("/api/budget_target", methods=["POST", "OPTIONS"])
+@app.route("/api/budget_target/", methods=["POST", "OPTIONS"])
 def api_budget_target():
     # Preflight handled globally, but safe to keep:
     if request.method == "OPTIONS":
