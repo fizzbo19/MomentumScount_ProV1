@@ -638,7 +638,7 @@
     const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
     const url = `${BACKEND_BASE}/${cleanEndpoint}/`;
 
-    cconsole.log("🚀 Calling API (with trailing slash):", url); // This helps you debug in the console (F12)
+    console.log("🚀 Calling API (with trailing slash):", url); // This helps you debug in the console (F12)
 
     try {
         const resp = await fetch(url, {
