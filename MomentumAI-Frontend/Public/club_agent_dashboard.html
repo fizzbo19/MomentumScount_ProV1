@@ -634,33 +634,33 @@
 
 
       async function safePost(endpoint, body) {
-  // 1. Ensure the endpoint doesn't start with a slash to avoid double slashes with BACKEND_BASE
-  const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
-  const url = `${BACKEND_BASE}/${cleanEndpoint}`;
+    // Standardize the endpoint: remove leading slash if it exists
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+    const url = `${BACKEND_BASE}/${cleanEndpoint}`;
 
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { 
-      "Content-Type": "application/json",
-      "Accept": "application/json"
-    },
-    body: JSON.stringify(body),
-    mode: "cors"
-  });
+    console.log("🚀 Calling API:", url); // This helps you debug in the console (F12)
 
-  const text = await resp.text();
+    try {
+        const resp = await fetch(url, {
+            method: "POST",
+            headers: { 
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            },
+            body: JSON.stringify(body),
+            mode: "cors" // Explicitly tell the browser to check CORS
+        });
 
-  if (!resp.ok) {
-    throw new Error(`Backend ${resp.status}: ${text.slice(0, 200)}`);
-  }
+        if (!resp.ok) {
+            const errorText = await resp.text();
+            throw new Error(`Server Error (${resp.status}): ${errorText.slice(0, 100)}`);
+        }
 
-  if (!text) return null;
-
-  try {
-    return JSON.parse(text);
-  } catch (e) {
-    throw new Error(`Invalid JSON response from server`);
-  }
+        return await resp.json();
+    } catch (e) {
+        console.error("❌ Fetch Error:", e);
+        throw e; // Pass it to the UI handler
+    }
 }
 
   
