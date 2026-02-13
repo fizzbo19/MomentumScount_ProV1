@@ -20,6 +20,7 @@ import math
 import numpy as np
 import pandas as pd
 import requests
+from flask_cors import CORS
 from flask import Flask, request, jsonify, send_from_directory, make_response
 from flask_mail import Mail, Message
 from werkzeug.exceptions import HTTPException
@@ -56,24 +57,8 @@ ALLOWED_ORIGINS = {_norm_origin(o) for o in ALLOWED_ORIGINS if o}
 # ----------------------------------------------------
 # ROBUST CORS HANDLER
 # ----------------------------------------------------
-@app.after_request
-def add_cors_headers(resp):
-    origin = request.headers.get("Origin")
-    if origin:
-        norm = _norm_origin(origin)
-        if norm in ALLOWED_ORIGINS:
-            resp.headers["Access-Control-Allow-Origin"] = origin
-            resp.headers["Vary"] = "Origin"
-            resp.headers["Access-Control-Allow-Credentials"] = "true"
-            req_headers = request.headers.get("Access-Control-Request-Headers")
-            resp.headers["Access-Control-Allow-Headers"] = req_headers or "Content-Type, Authorization, Accept"
-            resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    return resp
 
-# ✅ catch-all OPTIONS under /api so preflight ALWAYS gets CORS headers
-@app.route("/api/<path:any_path>", methods=["OPTIONS"])
-def any_options(any_path):
-    return make_response("", 204)
+CORS(app, resources={r"/api/*": {"origins": list(ALLOWED_ORIGINS)}}, supports_credentials=True)
 
 # ❌ REMOVE this (don’t keep both)
 # @app.before_request
@@ -114,6 +99,8 @@ app.config["MAIL_USE_SSL"] = (os.environ.get("MAIL_USE_SSL", "False") == "True")
 app.config["MAIL_USERNAME"] = MAIL_USERNAME
 app.config["MAIL_PASSWORD"] = MAIL_PASSWORD
 app.config["MAIL_TIMEOUT"] = int(os.environ.get("MAIL_TIMEOUT", "10"))
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB limit
+
 
 # Default sender must be a valid email string
 if MAIL_USERNAME:
@@ -970,7 +957,7 @@ def health():
     return(jsonify({"status": "online"}))
 
 @app.route("/api/squad_gap_analysis", methods=["POST", "OPTIONS"])
-def api_squad_gap_analysisv2():
+def api_squad_gap_analysis():
     # Preflight handled globally, but safe to keep:
     
 
@@ -1224,6 +1211,8 @@ def api_squad_gap_analysisv2():
                 )
             except Exception:
                 candidates["momentum_score"] = 0
+
+            if candidates.empty: continue
 
             targets_df = candidates.sort_values("momentum_score", ascending=False).head(8)
 

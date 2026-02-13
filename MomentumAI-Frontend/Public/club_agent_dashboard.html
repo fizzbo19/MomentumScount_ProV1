@@ -634,38 +634,36 @@
 
 
       async function safePost(endpoint, body) {
-  const url = BACKEND_BASE + endpoint;
+  // 1. Ensure the endpoint doesn't start with a slash to avoid double slashes with BACKEND_BASE
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+  const url = `${BACKEND_BASE}/${cleanEndpoint}`;
 
   const resp = await fetch(url, {
     method: "POST",
-    headers: {
+    headers: { 
       "Content-Type": "application/json",
-      "Accept": "application/json",
+      "Accept": "application/json"
     },
     body: JSON.stringify(body),
-    mode: "cors",
-
-    // ✅ ONLY enable this if you are using cookies / sessions
-    // credentials: "include",
+    mode: "cors"
   });
 
-  // Try to read as text first (covers HTML errors, empty bodies, etc.)
   const text = await resp.text();
 
   if (!resp.ok) {
     throw new Error(`Backend ${resp.status}: ${text.slice(0, 200)}`);
   }
 
-  // If server returned empty, just return null
   if (!text) return null;
 
-  // Parse JSON safely
   try {
     return JSON.parse(text);
-  } catch {
-    throw new Error(`Invalid JSON from backend: ${text.slice(0, 200)}`);
+  } catch (e) {
+    throw new Error(`Invalid JSON response from server`);
   }
 }
+
+  
 
 
       /* --- TAB LOGIC --- */
@@ -1064,44 +1062,63 @@ document.getElementById("compareSquadBtn")?.addEventListener("click", () => {
       /* --- SQUAD CSV UPLOAD --- */
       let squadCsvText = "";
 
-      document
-        .getElementById("squadFileInput")
-        .addEventListener("change", (e) => {
-          const file = e.target.files?.[0];
-          if (!file) return;
+      document.getElementById("squadFileInput").addEventListener("change", (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
 
-          const reader = new FileReader();
-          reader.onload = () => {
-            squadCsvText = String(reader.result || "");
-            try {
-                const csv_clean = squadCsvText.lstrip ? squadCsvText.lstrip("\ufeff") : squadCsvText.replace(/^\uFEFF/, "");
-                const rows = Papa.parse(csv_clean, { header: true, skipEmptyLines: true }).data;
-                squadPlayersParsed = rows.map(r => ({
-                 ...r,
-                 // normalize common keys so your filter works
-                short_name: r.short_name || r.name || r.player || r.Player || r.Name || "",
-                club_position: r.club_position || r.position || r.pos || r.Position || "",
-         }));
-        } catch (e) {
-            squadPlayersParsed = [];
-        }
+  // 1. Define the reader
+  const reader = new FileReader();
 
-            const box = document.getElementById("gapAnalysisResults");
-            box.innerHTML = `<div class="text-green-400">✅ Squad file loaded. Choose scope and run analysis.</div>`;
-          };
-          reader.readAsText(file);
-          try {
-         const parsed = Papa.parse(squadCsvText, { header: true, skipEmptyLines: true });
-            squadPlayersParsed = (parsed.data || []).map(r => {
-         const out = {};
-            Object.keys(r || {}).forEach(k => out[k ? k.trim().toLowerCase().replace(/\s+/g,"_") : k] = r[k]);
-         return out;
-         });
-        } catch (e) {
-            squadPlayersParsed = [];
-}
+  reader.onload = () => {
+    // 2. Capture and clean the raw text for the backend
+    // We strip the UTF-8 BOM (\ufeff) because it causes "Empty Dataframe" errors in Pandas
+    let rawResult = String(reader.result || "");
+    squadCsvText = rawResult.replace(/^\uFEFF/, ""); 
 
+    // 3. Parse for local UI usage
+    try {
+      const parsed = Papa.parse(squadCsvText, { 
+        header: true, 
+        skipEmptyLines: true,
+        dynamicTyping: true // Automatically converts numbers so charts don't break
+      });
+
+      const rows = parsed.data || [];
+
+      // 4. Normalize keys so the "Comparison" and "Filters" work regardless of CSV column naming
+      squadPlayersParsed = rows.map(r => {
+        // Create a normalized object where all keys are lowercase with underscores
+        const normalizedRow = {};
+        Object.keys(r).forEach(key => {
+          const cleanKey = key.trim().toLowerCase().replace(/\s+/g, "_");
+          normalizedRow[cleanKey] = r[key];
         });
+
+        // Ensure primary keys exist for your UI logic
+        return {
+          ...normalizedRow,
+          short_name: normalizedRow.short_name || normalizedRow.name || normalizedRow.player || "Unknown",
+          club_position: normalizedRow.club_position || normalizedRow.position || normalizedRow.pos || ""
+        };
+      });
+      
+      // 5. Update UI feedback
+      const box = document.getElementById("gapAnalysisResults");
+      if (box) {
+        box.innerHTML = `<div class="text-green-400 font-bold">✅ Squad file loaded (${rows.length} players).</div>
+                         <div class="text-xs text-gray-400 mt-1">Ready for AI Gap Analysis.</div>`;
+      }
+
+    } catch (err) {
+      console.error("Local parse error:", err);
+      const box = document.getElementById("gapAnalysisResults");
+      if (box) box.innerHTML = `<div class="text-red-400">❌ Error reading CSV format.</div>`;
+    }
+  };
+
+  // 6. Start the read process
+  reader.readAsText(file);
+});
 
       async function handleSquadAnalysis() {
         const box = document.getElementById("gapAnalysisResults");
