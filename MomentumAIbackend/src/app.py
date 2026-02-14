@@ -64,13 +64,18 @@ CORS(app, resources={r"/*": {"origins": list(ALLOWED_ORIGINS)}}, supports_creden
 @app.after_request
 def add_cors_headers(resp):
     origin = request.headers.get("Origin")
-    if origin and _norm_origin(origin) in ALLOWED_ORIGINS:
+    o_norm = _norm_origin(origin)
+    if origin:
+        print("CORS origin raw:", origin, "norm:", o_norm, "matched:", o_norm in ALLOWED_ORIGINS, flush=True)
+
+    if origin and o_norm in ALLOWED_ORIGINS:
         resp.headers["Access-Control-Allow-Origin"] = origin
         resp.headers["Vary"] = "Origin"
         resp.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
         resp.headers["Access-Control-Allow-Headers"] = "Content-Type,Accept,Authorization,X-Requested-With"
         resp.headers["Access-Control-Allow-Credentials"] = "true"
     return resp
+
 
 
 
@@ -1620,9 +1625,11 @@ def api_search_player():
         return (resp)
 
 
-@app.route("/api/budget_target/", methods=["POST","OPTIONS"])
-@cross_origin(origins=list(ALLOWED_ORIGINS), supports_credentials=True)
+@app.route("/api/budget_target/", methods=["POST", "OPTIONS"])
 def api_budget_target():
+    if request.method == "OPTIONS":
+        return ("", 204)
+
     try:
         payload = request.get_json(silent=True) or {}
         max_wage = safe_int(payload.get("max_wage"), 500000)
