@@ -55,9 +55,7 @@ ALLOWED_ORIGINS = {_norm_origin(o) for o in ALLOWED_ORIGINS if o}
 # ----------------------------------------------------
 # ROBUST CORS HANDLER
 # ----------------------------------------------------
-# ----------------------------------------------------
-# ROBUST CORS HANDLER
-# ----------------------------------------------------
+
 
 
 @app.after_request
@@ -72,6 +70,17 @@ def add_cors_headers(resp):
     return resp
 
 
+
+def cors_preflight_204():
+    resp = make_response("", 204)
+    origin = request.headers.get("Origin")
+    if origin and _norm_origin(origin) in ALLOWED_ORIGINS:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Vary"] = "Origin"
+        resp.headers["Access-Control-Allow-Credentials"] = "true"
+        resp.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type,Accept,Authorization,X-Requested-With"
+    return resp
 
 
 
@@ -1528,7 +1537,7 @@ def api_find_players():
         resp.status_code = 500
         return (resp)
 
-
+@app.route("/api/search_player", methods=["POST", "OPTIONS"])
 @app.route("/api/search_player/", methods=["POST","OPTIONS"])
 def api_search_player():
     # ✅ handle preflight safely
@@ -1625,7 +1634,7 @@ def api_search_player():
 @app.route("/api/budget_target/", methods=["POST", "OPTIONS"])
 def api_budget_target():
     if request.method == "OPTIONS":
-        return ("", 204)
+        return cors_preflight_204()
 
     try:
         payload = request.get_json(silent=True) or {}

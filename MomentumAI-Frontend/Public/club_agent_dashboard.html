@@ -1340,7 +1340,7 @@ document.getElementById("compareSquadBtn")?.addEventListener("click", () => {
 
       async function handleBudgetTargeting() {
         const list = document.getElementById("targetResults");
-        list.innerHTML = currentTargets
+        list.innerHTML = `<div class="flex justify-center py-10"><div class="spinner"></div></div>`
   .map((p, i) => `
     <div
       class="target-card flex justify-between items-center p-3 bg-gray-800 rounded border border-gray-700 mb-2 cursor-pointer hover:border-green-500"
@@ -1364,9 +1364,9 @@ document.getElementById("compareSquadBtn")?.addEventListener("click", () => {
 
         try {
           const data = await safePost("/budget_target", {
-            max_wage: document.getElementById("maxWage").value,
-            contract_year: document.getElementById("contractYear").value,
-          });
+            max_wage: Number(document.getElementById("maxWage").value),
+            contract_year: Number(document.getElementById("contractYear").value),
+});
 
           currentTargets = (data.targets || []).map((p) => ({
             ...p,
