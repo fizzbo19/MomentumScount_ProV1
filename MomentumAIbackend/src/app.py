@@ -20,7 +20,7 @@ import math
 import numpy as np
 import pandas as pd
 import requests
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 from flask import Flask, request, jsonify, send_from_directory, make_response
 from flask_mail import Mail, Message
 from werkzeug.exceptions import HTTPException
@@ -65,12 +65,13 @@ CORS(app, resources={r"/*": {"origins": list(ALLOWED_ORIGINS)}}, supports_creden
 def add_cors_headers(resp):
     origin = request.headers.get("Origin")
     if origin and _norm_origin(origin) in ALLOWED_ORIGINS:
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type,Accept,Authorization,X-Requested-With"
+        resp.headers["Access-Control-Allow-Origin"] = origin
         resp.headers["Vary"] = "Origin"
         resp.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type,Accept,Authorization"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type,Accept,Authorization,X-Requested-With"
         resp.headers["Access-Control-Allow-Credentials"] = "true"
     return resp
+
 
 
 # ❌ REMOVE this (don’t keep both)
@@ -1526,7 +1527,7 @@ def api_find_players():
         return (resp)
 
 
-@app.route("/api/search_player", methods=["POST", "OPTIONS"])
+@app.route("/api/search_player", methods=["POST","OPTIONS"])
 def api_search_player():
     # ✅ handle preflight safely
     if request.method == "OPTIONS":
@@ -1619,13 +1620,12 @@ def api_search_player():
         return (resp)
 
 
-@app.route("/api/budget_target/", methods=["POST"])
+@app.route("/api/budget_target/", methods=["POST","OPTIONS"])
+@cross_origin(origins=list(ALLOWED_ORIGINS), supports_credentials=True)
 def api_budget_target():
-    # Preflight handled globally, but safe to keep:
-
     try:
         payload = request.get_json(silent=True) or {}
-        max_wage = safe_int(payload.get("max_wage"), 500000)   # yearly wage cap
+        max_wage = safe_int(payload.get("max_wage"), 500000)
         contract_year = safe_int(payload.get("contract_year"), 2026)
         club_style = (payload.get("club_style") or "balanced").strip().lower()
 
