@@ -487,6 +487,26 @@ def _infer_position_col(df: pd.DataFrame) -> str:
             return c
     return ""
 
+def json_sanitize(x):
+    """Recursively replace NaN/Infinity with None so jsonify can produce valid JSON."""
+    if x is None:
+        return None
+    if isinstance(x, float):
+        if math.isnan(x) or math.isinf(x):
+            return None
+        return x
+    if isinstance(x, (np.floating,)):
+        xf = float(x)
+        if math.isnan(xf) or math.isinf(xf):
+            return None
+        return xf
+    if isinstance(x, dict):
+        return {k: json_sanitize(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [json_sanitize(v) for v in x]
+    return x
+
+
 
 def _normalize_positions(series: pd.Series) -> pd.Series:
     def _map_one(x):
@@ -1044,7 +1064,7 @@ def api_squad_gap_analysis():
         else:
             positions_to_analyze = positions_found if positions_found else ["CM"]
 
-        report = []
+            report = []
 
         # =====================================================
         # POSITION LOOP
@@ -1181,20 +1201,25 @@ def api_squad_gap_analysis():
                 traceback.print_exc()
                 continue
 
-        return jsonify({
+        # ✅ SUCCESS RESPONSE MUST BE OUTSIDE THE LOOP
+        payload = {
             "success": True,
             "positions_found": positions_found,
             "report": report
-        }), 200
+        }
+        return jsonify(json_sanitize(payload)), 200
 
     except Exception as e:
         traceback.print_exc()
-        return jsonify({
+        payload = {
             "success": False,
             "message": f"Server error: {str(e)}",
             "positions_found": [],
             "report": []
-        }), 200
+        }
+        return jsonify(json_sanitize(payload)), 200
+
+
 
 
 
