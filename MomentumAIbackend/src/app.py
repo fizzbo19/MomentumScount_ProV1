@@ -29,6 +29,7 @@ from werkzeug.exceptions import HTTPException
 # APP INIT
 # ----------------------------------------------------
 app = Flask(__name__, static_folder="public")
+app.url_map.strict_slashes = False
 
 def _norm_origin(o: str) -> str:
     return (o or "").strip().lower().rstrip("/")
@@ -58,8 +59,6 @@ ALLOWED_ORIGINS = {_norm_origin(o) for o in ALLOWED_ORIGINS if o}
 # ROBUST CORS HANDLER
 # ----------------------------------------------------
 
-# Change this line in app.py
-CORS(app, resources={r"/*": {"origins": list(ALLOWED_ORIGINS)}}, supports_credentials=True)
 
 @app.after_request
 def add_cors_headers(resp):
@@ -1420,7 +1419,7 @@ def api_submit_demo():
         return jsonify({"success": False, "message": "Submission error. Please try again."}), 500
 
 
-@app.route("/api/find_players", methods=["POST", "OPTIONS"])
+@app.route("/api/find_players/", methods=["POST", "OPTIONS"])
 def api_find_players():
     try:
         data = request.get_json(silent=True) or {}

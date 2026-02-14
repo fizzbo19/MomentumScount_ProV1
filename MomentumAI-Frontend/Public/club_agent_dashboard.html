@@ -632,36 +632,26 @@
         return `£${(gbp / 1000).toFixed(0)}k`;
       }
 
-
       async function safePost(endpoint, body) {
-    // Standardize the endpoint: remove leading slash if it exists
-    const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
-    const url = `${BACKEND_BASE}/${cleanEndpoint}/`;
+  const cleanEndpoint = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
+  const url = `${BACKEND_BASE}/${cleanEndpoint}`; // ✅ no forced trailing slash
 
-    console.log("🚀 Calling API (with trailing slash):", url); // This helps you debug in the console (F12)
+  console.log("🚀 Calling API:", url);
 
-    try {
-        const resp = await fetch(url, {
-            method: "POST",
-            headers: { 
-                "Content-Type": "application/json",
-                "Accept": "application/json"
-            },
-            body: JSON.stringify(body),
-            mode: "cors" // Explicitly tell the browser to check CORS
-        });
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Accept": "application/json" },
+    body: JSON.stringify(body),
+    mode: "cors"
+  });
 
-        if (!resp.ok) {
-            const errorText = await resp.text();
-            throw new Error(`Server Error (${resp.status}): ${errorText.slice(0, 100)}`);
-        }
-
-        return await resp.json();
-    } catch (e) {
-        console.error("❌ Fetch Error:", e);
-        throw e; // Pass it to the UI handler
-    }
+  if (!resp.ok) {
+    const errorText = await resp.text();
+    throw new Error(`Server Error (${resp.status}): ${errorText.slice(0, 200)}`);
+  }
+  return await resp.json();
 }
+
 
   
 
