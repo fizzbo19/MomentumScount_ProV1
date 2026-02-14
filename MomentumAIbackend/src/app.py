@@ -992,7 +992,7 @@ def find_similar_players(df, row, top_n=5):
 def health():
     return (jsonify({"status": "online"}))
 
-
+@app.route("/api/squad_gap_analysis", methods=["POST", "OPTIONS"])
 @app.route("/api/squad_gap_analysis/", methods=["POST", "OPTIONS"])
 def api_squad_gap_analysis():
     try:
@@ -1418,7 +1418,7 @@ def api_submit_demo():
         traceback.print_exc()
         return jsonify({"success": False, "message": "Submission error. Please try again."}), 500
 
-
+@app.route("/api/find_players", methods=["POST", "OPTIONS"])
 @app.route("/api/find_players/", methods=["POST", "OPTIONS"])
 def api_find_players():
     try:
@@ -1621,7 +1621,7 @@ def api_search_player():
         resp.status_code = 500
         return (resp)
 
-
+@app.route("/api/budget_target", methods=["POST", "OPTIONS"])
 @app.route("/api/budget_target/", methods=["POST", "OPTIONS"])
 def api_budget_target():
     if request.method == "OPTIONS":
