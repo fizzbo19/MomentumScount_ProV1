@@ -1803,6 +1803,7 @@ def api_player_financial():
 @app.route("/api/budget_target", methods=["POST", "OPTIONS"])
 @app.route("/api/budget_target/", methods=["POST", "OPTIONS"])
 def api_budget_target():
+
     if request.method == "OPTIONS":
         return cors_preflight_204()
 
@@ -1814,6 +1815,8 @@ def api_budget_target():
         max_wage = safe_int(payload.get("max_wage"), 500000)
         contract_year = safe_int(payload.get("contract_year"), 2026)
         club_style = (payload.get("club_style") or "balanced").strip().lower()
+
+        include_similars = bool(payload.get("include_similars", False))
 
         # -----------------------------
         # Guard: DB not loaded
@@ -1860,7 +1863,6 @@ def api_budget_target():
         if year_col:
             df[year_col] = pd.to_numeric(df[year_col], errors="coerce").fillna(0).astype(int)
 
-        # ensure a position column exists-ish for scoring/fit
         pos_col = "club_position" if "club_position" in df.columns else None
 
         # -----------------------------
@@ -1869,9 +1871,6 @@ def api_budget_target():
         wage_num = pd.to_numeric(df[wage_col], errors="coerce").fillna(0)
         df["wage_yearly_calc"] = wage_num * 52 if wage_col in ("wage_eur", "wage", "wage_weekly") else wage_num
 
-        
-        
-        
         # -----------------------------
         # Apply filters
         # -----------------------------
@@ -1879,9 +1878,7 @@ def api_budget_target():
         if year_col:
             df = df[df[year_col] <= contract_year]
 
-        # -----------------------------
-# Extra filters: position + age
-# -----------------------------
+        # Extra filters: position + age
         if position_filter and pos_col:
             df["__pos_norm"] = df[pos_col].astype(str).apply(normalize_position)
             df = df[df["__pos_norm"] == normalize_position(position_filter)]
@@ -1890,17 +1887,14 @@ def api_budget_target():
             df["age"] = pd.to_numeric(df["age"], errors="coerce").fillna(0).astype(int)
             df = df[(df["age"] >= age_min) & (df["age"] <= age_max)]
 
-
         if df.empty:
             return jsonify({"targets": [], "error": "No players matched constraints"}), 200
-        
 
         # -----------------------------
         # Sort by overall (and momentum as tiebreaker)
         # -----------------------------
         df["overall"] = pd.to_numeric(df.get("overall", 0), errors="coerce").fillna(0).astype(int)
 
-        # optional: compute momentum_score for ranking context
         try:
             df["momentum_score"] = df.apply(
                 lambda r: compute_score_for_player(
@@ -1924,12 +1918,12 @@ def api_budget_target():
             full_stats = dict_json_safe(row.to_dict())
             row_pos = (full_stats.get("club_position") or "CM") if pos_col else "CM"
 
-            # ✅ projections + benchmarks MUST be computed inside loop (row exists here)
+            # projections + benchmarks (inside loop)
             age = safe_int(full_stats.get("age", 23), 23)
             projections = project_player(row, years=years_to_project(age))
             bench = POS_BENCHMARKS.get(row_pos, POS_BENCHMARKS.get("CM", {}))
 
-            # ✅ NEW 5 sections (safe defaults)
+            # NEW sections (safe defaults)
             try:
                 fit = compute_fit_score(row, row_pos, club_style)
             except Exception:
@@ -1947,7 +1941,12 @@ def api_budget_target():
             try:
                 risk = compute_risk_profile(row)
             except Exception:
-                risk = {"injury_risk": 0, "contract_risk": 0, "wage_risk": 0, "ai_suggestions": []}
+                risk = {
+                    "injury_risk": 0,
+                    "contract_risk": 0,
+                    "wage_risk": 0,
+                    "ai_suggestions": []
+                }
 
             try:
                 deal = compute_deal_intel(row)
@@ -1955,12 +1954,15 @@ def api_budget_target():
                 deal = {
                     "contract_end_year": safe_int(full_stats.get(year_col, 0)) if year_col else 0,
                     "release_clause_eur": safe_int(full_stats.get("release_clause_eur", 0)),
-                    "ai_note": "",
+                    "clause_note": "No clause data",
                 }
 
-            # similars optional (can be heavy)
-            
-                similars = []
+            similars = []
+            if include_similars:
+                try:
+                    similars = find_similar_players(df, row, top_n=3)
+                except Exception:
+                    similars = []
 
             out.append({
                 "short_name": full_stats.get("short_name") or full_stats.get("name") or "Unknown",
@@ -1970,14 +1972,10 @@ def api_budget_target():
                 "wage_yearly": safe_int(full_stats.get("wage_yearly_calc", 0)),
                 "contract_end": safe_int(full_stats.get(year_col, 0)) if year_col else 0,
 
-                # ✅ charts data
                 "projections": projections,
                 "benchmarks": bench,
-
-                # existing
                 "full_stats": full_stats,
 
-                # added fields
                 "momentum_score": safe_float(full_stats.get("momentum_score"), 0),
                 "fit_score": fit,
                 "momentum": momentum,
@@ -1986,6 +1984,7 @@ def api_budget_target():
                 "similar_players": similars,
             })
 
+        # ✅ return must be AFTER loop
         return jsonify({"targets": out}), 200
 
     except Exception as e:
@@ -1993,6 +1992,9 @@ def api_budget_target():
         resp = jsonify({"error": str(e)})
         resp.status_code = 500
         return resp
+
+
+            
 
 
 @app.route("/api/next_match", methods=["GET", "OPTIONS"])
