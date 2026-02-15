@@ -78,9 +78,21 @@ def cors_preflight_204():
         resp.headers["Access-Control-Allow-Origin"] = origin
         resp.headers["Vary"] = "Origin"
         resp.headers["Access-Control-Allow-Credentials"] = "true"
-        resp.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type,Accept,Authorization,X-Requested-With"
+
+        # Echo requested method / headers if provided (very robust)
+        req_method = request.headers.get("Access-Control-Request-Method", "GET,POST,OPTIONS")
+        req_headers = request.headers.get("Access-Control-Request-Headers")
+
+        resp.headers["Access-Control-Allow-Methods"] = req_method
+        if req_headers:
+            resp.headers["Access-Control-Allow-Headers"] = req_headers
+        else:
+            resp.headers["Access-Control-Allow-Headers"] = (
+                "Content-Type,Accept,Authorization,X-Requested-With"
+            )
+
     return resp
+
 
 
 
@@ -107,7 +119,25 @@ def handle_global_error(e):
         "error": str(e),
         "message": "Internal Server Error - Check logs"
     }), code)
+
+    # 🔐 Ensure CORS headers even on errors
+    origin = request.headers.get("Origin")
+    if origin and _norm_origin(origin) in ALLOWED_ORIGINS:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Vary"] = "Origin"
+        resp.headers["Access-Control-Allow-Credentials"] = "true"
+        resp.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+        # Echo back requested headers if present (more robust)
+        req_headers = request.headers.get("Access-Control-Request-Headers")
+        if req_headers:
+            resp.headers["Access-Control-Allow-Headers"] = req_headers
+        else:
+            resp.headers["Access-Control-Allow-Headers"] = (
+                "Content-Type,Accept,Authorization,X-Requested-With"
+            )
+
     return resp
+
 
 
 
