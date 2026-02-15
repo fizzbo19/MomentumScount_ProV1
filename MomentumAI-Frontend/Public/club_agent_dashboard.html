@@ -360,7 +360,53 @@
           <h2 class="text-2xl font-semibold text-green-400 mb-4">
             Budget & Contract Targeting Pro
           </h2>
-
+          <div class="bg-gray-900 p-4 rounded-lg border border-gray-600 space-y-3">
+            <div class="text-sm font-bold text-gray-200">Player Financial Search</div>
+          
+            <div class="flex gap-2">
+              <input id="targetPlayerSearch"
+                class="value-input"
+                placeholder="Search player (e.g. Osimhen)..." />
+              <button id="targetPlayerSearchBtn"
+                class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded text-white font-bold">
+                Lookup
+              </button>
+            </div>
+          
+            <div id="targetPlayerFinanceBox" class="text-sm text-gray-300"></div>
+          </div>
+          
+          <div class="bg-gray-900 p-4 rounded-lg border border-gray-600 space-y-3">
+            <div class="text-sm font-bold text-gray-200">Position + Age Filter</div>
+          
+            <label class="block text-sm font-medium text-gray-300">Position</label>
+            <select id="targetPositionFilter" class="value-input">
+              <option value="">Any</option>
+              <option value="GK">GK</option>
+              <option value="RB">RB</option>
+              <option value="LB">LB</option>
+              <option value="CB">CB</option>
+              <option value="CDM">CDM</option>
+              <option value="CM">CM</option>
+              <option value="CAM">CAM</option>
+              <option value="RW">RW</option>
+              <option value="LW">LW</option>
+              <option value="CF">CF</option>
+              <option value="ST">ST</option>
+            </select>
+          
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-sm font-medium text-gray-300">Age Min</label>
+                <input id="targetAgeMin" type="number" value="18" class="value-input" />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-300">Age Max</label>
+                <input id="targetAgeMax" type="number" value="32" class="value-input" />
+              </div>
+            </div>
+          </div>
+          
           <div class="grid grid-cols-1 md:grid-cols-12 gap-8">
             <div class="md:col-span-4 space-y-6">
               <div
@@ -453,9 +499,7 @@
           <div class="flex justify-between items-center mb-6">
             <h2
               class="text-2xl font-semibold text-green-400"
-              id="analyticsHeader"
-            >
-              Player Analytics
+              id="analyticsHeader">Player Analytics</h2>
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                 <div class="bg-gray-900 p-3 rounded border border-gray-700">
                   <div class="text-xs text-gray-400 mb-2 font-semibold">Compare vs Database Player</div>
@@ -476,6 +520,8 @@
                   </div>
               
             </h2>
+
+            
             <button
               id="backToScouting"
               class="text-sm text-gray-400 border border-gray-600 px-3 py-1 rounded"
@@ -573,25 +619,32 @@
          ========================= */
 
          function chartTheme(titleText) {
-            return {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                 legend: { labels: { color: "#c9d1d9" } },
-                title: {
-                 display: true,
-                 text: titleText,
-                 color: "#c9d1d9",
-                 font: { size: 14, weight: "700" },
-                padding: { top: 8, bottom: 8 }
-      }
+          return {
+              responsive: true,
+               maintainAspectRatio: false,
+             plugins: {
+               legend: { labels: { color: "#c9d1d9" } },
+         title: {
+              display: true,
+               text: titleText,
+               color: "#c9d1d9",
+               font: { size: 14, weight: "700" },
+             padding: { top: 8, bottom: 8 },
+      },
     },
-    scales: {
-      x: { ticks: { color: "#c9d1d9" }, grid: { color: "rgba(201,209,217,0.08)" } },
-      y: { ticks: { color: "#c9d1d9" }, grid: { color: "rgba(201,209,217,0.08)" } }
-    }
+          scales: {
+               x: {
+                  ticks: { color: "#c9d1d9" },
+                  grid: { color: "rgba(201,209,217,0.08)" },
+      },
+             y: {
+                 ticks: { color: "#c9d1d9" },
+                grid: { color: "rgba(201,209,217,0.08)" },
+      },
+    },
   };
 }
+
 
 
 
@@ -1004,6 +1057,19 @@
         resetBtn.onclick = resetAll;
         analyzeSquadBtn.onclick = handleSquadAnalysis;
         targetPlayersBtn.onclick = handleBudgetTargeting;
+        
+          // ✅ NEW: Financial lookup button (Transfer Targets tab)
+  document
+    .getElementById("targetPlayerSearchBtn")
+    ?.addEventListener("click", handleTargetPlayerFinancialLookup);
+
+  // Optional: allow Enter key in input
+  document
+    .getElementById("targetPlayerSearch")
+    ?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") handleTargetPlayerFinancialLookup();
+    });
+
 
         document.getElementById("exportTargetsBtn").onclick = handleExportCSV;
         document.getElementById("saveTargetsBtn").onclick = handleSaveToProfile;
@@ -1338,74 +1404,131 @@ document.getElementById("compareSquadBtn")?.addEventListener("click", () => {
         }
       }
 
-      async function handleBudgetTargeting() {
-        const list = document.getElementById("targetResults");
-        list.innerHTML = `<div class="flex justify-center py-10"><div class="spinner"></div></div>`
-  .map((p, i) => `
-    <div
-      class="target-card flex justify-between items-center p-3 bg-gray-800 rounded border border-gray-700 mb-2 cursor-pointer hover:border-green-500"
-      data-idx="${i}"
-    >
-      <div>
-        <div class="text-sm font-bold text-green-400">${p.short_name}</div>
-        <div class="text-xs text-gray-500">
-          Exp: ${p.contract_end} | ${fmtGBPFromEur(p.wage_yearly)}/yr
+      async function handleTargetPlayerFinancialLookup() {
+  const q = document.getElementById("targetPlayerSearch")?.value?.trim();
+  const box = document.getElementById("targetPlayerFinanceBox");
+  if (!box) return;
+
+  if (!q) {
+    box.innerHTML = `<div class="text-xs text-red-400">Type a player name.</div>`;
+    return;
+  }
+
+  box.innerHTML = `<div class="flex items-center gap-2 text-xs text-gray-400">
+    <div class="spinner" style="width:16px;height:16px;border-width:3px;"></div> Loading...
+  </div>`;
+
+  try {
+    const data = await safePost("/player_financial", { player_name: q });
+    const p = data?.matches?.[0];
+    if (!p) {
+      box.innerHTML = `<div class="text-xs text-yellow-400">No match found.</div>`;
+      return;
+    }
+
+    const clubs = Array.isArray(p.potential_interested_clubs) ? p.potential_interested_clubs : [];
+    box.innerHTML = `
+      <div class="bg-black/30 border border-gray-700 rounded p-3">
+        <div class="flex justify-between items-center">
+          <div class="font-bold text-green-300">${p.short_name}</div>
+          <div class="text-xs text-gray-400">${p.club_position || ""} • OVR ${p.overall || ""}</div>
+        </div>
+
+        <div class="text-xs text-gray-400 mt-1">
+          ${p.club_name ? `${p.club_name}` : ""}${p.league_name ? ` • ${p.league_name}` : ""}
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 mt-3 text-sm">
+          <div class="bg-gray-900/40 border border-gray-700 rounded p-2">
+            <div class="text-xs text-gray-400">Value</div>
+            <div class="font-bold text-white">${fmtGBPFromEur(p.value_eur || 0)}</div>
+          </div>
+
+          <div class="bg-gray-900/40 border border-gray-700 rounded p-2">
+            <div class="text-xs text-gray-400">Wage (Annual)</div>
+            <div class="font-bold text-white">${fmtGBPFromEur(p.wage_yearly || 0)}</div>
+          </div>
+
+          <div class="bg-gray-900/40 border border-gray-700 rounded p-2">
+            <div class="text-xs text-gray-400">Contract End</div>
+            <div class="font-bold text-white">${p.contract_end || "N/A"}</div>
+          </div>
+
+          <div class="bg-gray-900/40 border border-gray-700 rounded p-2">
+            <div class="text-xs text-gray-400">Years Left</div>
+            <div class="font-bold text-white">${p.years_left ?? "N/A"}</div>
+          </div>
+        </div>
+
+        <div class="mt-3">
+          <div class="text-xs font-bold text-yellow-300 mb-1">Potential Interested Clubs</div>
+          ${
+            clubs.length
+              ? `<div class="text-xs text-gray-300">${clubs.join(" • ")}</div>`
+              : `<div class="text-xs text-gray-500 italic">None suggested.</div>`
+          }
         </div>
       </div>
-      <div class="text-lg font-bold text-white">${p.overall}</div>
-    </div>
-  `)
-  .join("");
+    `;
+  } catch (e) {
+    box.innerHTML = `<div class="text-xs text-red-400">${String(e?.message || e)}</div>`;
+  }
+}
+ 
+      async function handleBudgetTargeting() {
+  const list = document.getElementById("targetResults");
+  list.innerHTML = `<div class="flex justify-center py-10"><div class="spinner"></div></div>`;
 
-  ;
-  
+  try {
+    const data = await safePost("/budget_target", {
+      max_wage: Number(document.getElementById("maxWage").value),
+      contract_year: Number(document.getElementById("contractYear").value),
 
+      // ✅ NEW filters
+      position: (document.getElementById("targetPositionFilter")?.value || "").trim(),
+      age_min: Number(document.getElementById("targetAgeMin")?.value || 0),
+      age_max: Number(document.getElementById("targetAgeMax")?.value || 99),
+    });
 
+    currentTargets = (data.targets || []).map((p) => ({
+      ...p,
+      full_attributes: p.full_attributes || p.full_stats || {},
+    }));
 
-        try {
-          const data = await safePost("/budget_target", {
-            max_wage: Number(document.getElementById("maxWage").value),
-            contract_year: Number(document.getElementById("contractYear").value),
-});
+    if (currentTargets.length === 0) {
+      list.innerHTML =
+        '<p class="text-center text-gray-500 mt-10">No players found matching these constraints.</p>';
+      return;
+    }
 
-          currentTargets = (data.targets || []).map((p) => ({
-            ...p,
-            full_attributes: p.full_attributes || p.full_stats || {},
-          }));
-
-          if (currentTargets.length === 0) {
-            list.innerHTML =
-              '<p class="text-center text-gray-500 mt-10">No players found matching these financial constraints.</p>';
-            return;
-          }
-
-          list.innerHTML = currentTargets
-            .map(
-              (p, i) => `
-              <div
-                class="flex justify-between items-center p-3 bg-gray-800 rounded border border-gray-700 mb-2 cursor-pointer hover:border-green-500"
-                onclick="loadPlayerDetails(currentTargets[${i}]);"
-              >
-                <div>
-                  <div class="text-sm font-bold text-green-400">${p.short_name}</div>
-                  <div class="text-xs text-gray-500">
-                    Exp: ${p.contract_end} | ${fmtGBPFromEur(p.wage_yearly)}/yr
-                  </div>
-                </div>
-                <div class="text-lg font-bold text-white">${p.overall}</div>
+    // ✅ add .target-card + data-idx so your click delegation works
+    list.innerHTML = currentTargets
+      .map(
+        (p, i) => `
+          <div
+            class="target-card flex justify-between items-center p-3 bg-gray-800 rounded border border-gray-700 mb-2 cursor-pointer hover:border-green-500"
+            data-idx="${i}"
+          >
+            <div>
+              <div class="text-sm font-bold text-green-400">${p.short_name}</div>
+              <div class="text-xs text-gray-500">
+                Exp: ${p.contract_end} | ${fmtGBPFromEur(p.wage_yearly)}/yr
               </div>
-            `
-            )
-            .join("");
-        } catch (err) {
-  console.error("Targeting Error:", err);
-  list.innerHTML = `<p class="text-red-500 text-center mt-10">
-    Error connecting to scouting server.<br>
-    <span class="text-xs text-gray-400">${String(err?.message || err)}</span>
-  </p>`;
+            </div>
+            <div class="text-lg font-bold text-white">${p.overall}</div>
+          </div>
+        `
+      )
+      .join("");
+  } catch (err) {
+    console.error("Targeting Error:", err);
+    list.innerHTML = `<p class="text-red-500 text-center mt-10">
+      Error connecting to scouting server.<br>
+      <span class="text-xs text-gray-400">${String(err?.message || err)}</span>
+    </p>`;
+  }
 }
 
-      }
 
       function renderPlayerCard(player) {
         const attrs = player.full_attributes || {};
@@ -1766,30 +1889,30 @@ if (bctx) {
           `;
         }
         // ✅ Populate squad dropdown (place RIGHT HERE)
-            const squadSel = document.getElementById("compareSquadSelect");
-        if (squadSel) {
-          const pos = String(player.club_position || "").toUpperCase();
-          const list = (squadPlayersParsed || [])
-            .filter(r =>
-              String(r.club_position || r.position || r.pos || "")
-                .toUpperCase()
-                .includes(pos)
-            )
-            .slice(0, 200);
+        const squadSel = document.getElementById("compareSquadSelect");
+if    (squadSel) {
+        const pos = String(player.club_position || "").toUpperCase();
 
-          squadSel.innerHTML = list.length
-            ? list
-                .map(
-                  (r, i) =>
-                    `<option value="${i}">${
-                      r.short_name || r.name || r.player || "Squad Player"
-                    }</option>`
-                )
-                .join("")
-            : `<option value="">No squad players found for ${pos}</option>`;
-        }
-        switchTab("analytics");
-      }
+        const list = (squadPlayersParsed || [])
+          .map((r, idx) => ({ r, idx })) // keep original index
+          .filter(({ r }) =>
+          String(r.club_position || r.position || r.pos || "")
+            .toUpperCase()
+            .includes(pos)
+            )
+           .slice(0, 200);
+
+  squadSel.innerHTML = list.length
+    ? list
+        .map(
+          ({ r, idx }) =>
+            `<option value="${idx}">${
+              r.short_name || r.name || r.player || "Squad Player"
+            }</option>`
+        )
+        .join("")
+    : `<option value="">No squad players found for ${pos}</option>`;
+}}
 
       /* --- EXPORT / SAVING LOGIC --- */
       function handleExportCSV() {
@@ -2099,4 +2222,4 @@ if (compareBtn) {
       });
     </script>
   </body>
-</html>
+  </html>

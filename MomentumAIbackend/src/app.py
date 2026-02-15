@@ -1083,12 +1083,14 @@ def api_squad_gap_analysis():
         else:
             positions_found = []
 
+
+        report = []
         if scope_pos != "ALL":
             positions_to_analyze = [scope_pos]
         else:
             positions_to_analyze = positions_found if positions_found else ["CM"]
 
-            report = []
+            
 
         # =====================================================
         # POSITION LOOP
@@ -1630,6 +1632,144 @@ def api_search_player():
         resp.status_code = 500
         return (resp)
 
+
+from datetime import datetime
+
+def normalize_position(pos: str) -> str:
+    p = (pos or "").strip().upper()
+    # keep it simple; your DB likely already uses these
+    aliases = {
+        "RWB": "RB", "LWB": "LB",
+        "RCB": "CB", "LCB": "CB",
+        "CDM": "CDM", "CM": "CM", "CAM": "CAM",
+        "RF": "CF", "LF": "CF",
+    }
+    return aliases.get(p, p)
+
+def guess_interested_clubs(row, df):
+    """
+    Deterministic + realistic-ish heuristic:
+    - Uses overall/value/wage and (if present) league + club name.
+    - Returns a short list of clubs that *could* be interested.
+    """
+    # pools by tier
+    elite = ["Real Madrid", "Manchester City", "Bayern Munich", "Paris Saint-Germain", "Barcelona", "Liverpool", "Arsenal", "Inter", "AC Milan"]
+    ucl = ["Tottenham", "Chelsea", "Manchester United", "Atletico Madrid", "Juventus", "Borussia Dortmund", "Napoli", "RB Leipzig", "Bayer Leverkusen"]
+    europa = ["Sevilla", "Roma", "Lazio", "Real Sociedad", "Villarreal", "Newcastle", "Aston Villa", "Brighton", "West Ham"]
+    stepping = ["Benfica", "Porto", "Sporting CP", "Ajax", "PSV", "Feyenoord", "RB Salzburg", "Club Brugge", "Celtic"]
+
+    club = (row.get("club_name") or row.get("club") or "").strip()
+    league = (row.get("league_name") or row.get("league") or "").strip()
+
+    overall = int(pd.to_numeric(row.get("overall", 0), errors="coerce") or 0)
+    value = int(pd.to_numeric(row.get("value_eur", 0), errors="coerce") or 0)
+    wage_week = int(pd.to_numeric(row.get("wage_eur", row.get("wage", 0)), errors="coerce") or 0)
+    wage_year = wage_week * 52 if wage_week else int(pd.to_numeric(row.get("wage_yearly_calc", 0), errors="coerce") or 0)
+
+    # pick tier based on player level/value
+    if overall >= 86 or value >= 70_000_000:
+        pool = elite + ucl
+    elif overall >= 82 or value >= 35_000_000:
+        pool = ucl + europa
+    elif overall >= 78 or value >= 15_000_000:
+        pool = europa + stepping
+    else:
+        pool = stepping
+
+    # light “league realism” nudge (optional)
+    # if player already in Premier League, still keep PL big clubs in pool, etc.
+    # (don’t overfit—keep it simple)
+
+    # remove current club if present
+    pool = [c for c in pool if c.lower() != club.lower()]
+
+    # wage sanity: if wage is huge, remove “stepping stone” clubs
+    if wage_year >= 8_000_000:  # ~€150k/wk+
+        pool = [c for c in pool if c not in stepping]
+
+    # return 5 unique
+    out = []
+    for c in pool:
+        if c not in out:
+            out.append(c)
+        if len(out) >= 5:
+            break
+    return out
+
+
+@app.route("/api/player_financial", methods=["POST", "OPTIONS"])
+@app.route("/api/player_financial/", methods=["POST", "OPTIONS"])
+def api_player_financial():
+    if request.method == "OPTIONS":
+        return cors_preflight_204()
+
+    payload = request.get_json(silent=True) or {}
+    q = (payload.get("player_name") or "").strip()
+    if not q:
+        return jsonify({"error": "player_name required"}), 200
+
+    if player_data_base is None or player_data_base.empty:
+        return jsonify({"error": "Database not loaded"}), 200
+
+    df = player_data_base.copy()
+
+    # locate columns
+    name_col = "short_name" if "short_name" in df.columns else ("name" if "name" in df.columns else None)
+    if not name_col:
+        return jsonify({"error": "Name column not found in DB"}), 200
+
+    wage_col = next((c for c in ("wage_eur", "wage", "wage_weekly", "wage_yearly") if c in df.columns), None)
+    year_col = next((c for c in ("club_contract_valid_until_year", "contract_valid_until", "contract_end") if c in df.columns), None)
+    pos_col = "club_position" if "club_position" in df.columns else None
+
+    # wage yearly calc
+    if wage_col:
+        wage_num = pd.to_numeric(df[wage_col], errors="coerce").fillna(0)
+        df["wage_yearly_calc"] = wage_num * 52 if wage_col in ("wage_eur", "wage", "wage_weekly") else wage_num
+    else:
+        df["wage_yearly_calc"] = 0
+
+    # match by contains (case-insensitive)
+    mask = df[name_col].astype(str).str.contains(q, case=False, na=False)
+    hits = df[mask].copy()
+
+    if hits.empty:
+        return jsonify({"matches": [], "error": "No player found"}), 200
+
+    # choose best hit (highest overall)
+    hits["overall"] = pd.to_numeric(hits.get("overall", 0), errors="coerce").fillna(0).astype(int)
+    row = hits.sort_values("overall", ascending=False).iloc[0]
+
+    # contract year
+    contract_end = 0
+    if year_col:
+        try:
+            contract_end = int(pd.to_numeric(row.get(year_col, 0), errors="coerce") or 0)
+        except Exception:
+            contract_end = 0
+
+    current_year = datetime.utcnow().year
+    years_left = max(0, contract_end - current_year) if contract_end else 0
+
+    position = normalize_position(row.get(pos_col, "")) if pos_col else "N/A"
+
+    profile = {
+        "short_name": row.get("short_name") or row.get("name") or "Unknown",
+        "club_name": row.get("club_name") or row.get("club") or "",
+        "league_name": row.get("league_name") or row.get("league") or "",
+        "club_position": position,
+        "age": int(pd.to_numeric(row.get("age", 0), errors="coerce") or 0),
+        "overall": int(pd.to_numeric(row.get("overall", 0), errors="coerce") or 0),
+        "value_eur": int(pd.to_numeric(row.get("value_eur", 0), errors="coerce") or 0),
+        "wage_yearly": int(pd.to_numeric(row.get("wage_yearly_calc", 0), errors="coerce") or 0),
+        "contract_end": contract_end,
+        "years_left": years_left,
+        "release_clause_eur": int(pd.to_numeric(row.get("release_clause_eur", 0), errors="coerce") or 0),
+        "potential_interested_clubs": guess_interested_clubs(row, df),
+    }
+
+    return jsonify({"matches": [profile]}), 200
+
 @app.route("/api/budget_target", methods=["POST", "OPTIONS"])
 @app.route("/api/budget_target/", methods=["POST", "OPTIONS"])
 def api_budget_target():
@@ -1638,6 +1778,9 @@ def api_budget_target():
 
     try:
         payload = request.get_json(silent=True) or {}
+        position_filter = (payload.get("position") or "").strip().upper()
+        age_min = safe_int(payload.get("age_min"), 0)
+        age_max = safe_int(payload.get("age_max"), 99)
         max_wage = safe_int(payload.get("max_wage"), 500000)
         contract_year = safe_int(payload.get("contract_year"), 2026)
         club_style = (payload.get("club_style") or "balanced").strip().lower()
@@ -1696,6 +1839,9 @@ def api_budget_target():
         wage_num = pd.to_numeric(df[wage_col], errors="coerce").fillna(0)
         df["wage_yearly_calc"] = wage_num * 52 if wage_col in ("wage_eur", "wage", "wage_weekly") else wage_num
 
+        
+        
+        
         # -----------------------------
         # Apply filters
         # -----------------------------
@@ -1703,8 +1849,21 @@ def api_budget_target():
         if year_col:
             df = df[df[year_col] <= contract_year]
 
+        # -----------------------------
+# Extra filters: position + age
+# -----------------------------
+        if position_filter and pos_col:
+            df["__pos_norm"] = df[pos_col].astype(str).apply(normalize_position)
+            df = df[df["__pos_norm"] == normalize_position(position_filter)]
+
+        if "age" in df.columns:
+            df["age"] = pd.to_numeric(df["age"], errors="coerce").fillna(0).astype(int)
+            df = df[(df["age"] >= age_min) & (df["age"] <= age_max)]
+
+
         if df.empty:
             return jsonify({"targets": [], "error": "No players matched constraints"}), 200
+        
 
         # -----------------------------
         # Sort by overall (and momentum as tiebreaker)
