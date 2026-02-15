@@ -1959,9 +1959,7 @@ def api_budget_target():
                 }
 
             # similars optional (can be heavy)
-            try:
-                similars = find_similar_players(df, row, top_n=3)
-            except Exception:
+            
                 similars = []
 
             out.append({
