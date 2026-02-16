@@ -660,6 +660,15 @@
       let projectionChart = null;
       let benchmarkChart = null;
 
+      // ✅ MomentumScout chart colors (high contrast on dark)
+      const MS_GREEN = "rgba(34,197,94,1)";
+      const MS_GREEN_FILL = "rgba(34,197,94,0.18)";
+      const MS_GREEN_SOFT = "rgba(34,197,94,0.55)";
+
+      const MS_YELLOW = "rgba(250,204,21,1)";
+      const MS_YELLOW_SOFT = "rgba(250,204,21,0.45)";
+
+
       /* ------------- GLOBAL ELEMENTS ------------- */
       let posSelect,
         coreSliders,
@@ -689,33 +698,45 @@
       /* =========================
          ✅ NEW HELPERS (safe add)
          ========================= */
-
          function chartTheme(titleText) {
           return {
-              responsive: true,
-               maintainAspectRatio: false,
-             plugins: {
-               legend: { labels: { color: "#c9d1d9" } },
-         title: {
-              display: true,
-               text: titleText,
-               color: "#c9d1d9",
-               font: { size: 14, weight: "700" },
-             padding: { top: 8, bottom: 8 },
+           responsive: true,
+           maintainAspectRatio: false,
+            plugins: {
+           legend: { labels: { color: "#c9d1d9" } },
+           title: {
+           display: true,
+           text: titleText,
+           color: "#c9d1d9",
+           font: { size: 14, weight: "700" },
+           padding: { top: 8, bottom: 8 },
       },
+           tooltip: {
+           enabled: true,
+           backgroundColor: "rgba(15, 23, 42, 0.95)",
+           titleColor: "#e5e7eb",
+           bodyColor: "#e5e7eb",
+           borderColor: "rgba(34,197,94,0.35)",
+           borderWidth: 1
+      }
     },
-          scales: {
-               x: {
-                  ticks: { color: "#c9d1d9" },
-                  grid: { color: "rgba(201,209,217,0.08)" },
+           elements: {
+             line: { borderWidth: 3 },
+          point: { radius: 3, hoverRadius: 6 }
+     },
+            scales: {
+             x: {
+               ticks: { color: "#c9d1d9" },
+               grid: { color: "rgba(201,209,217,0.08)" },
       },
-             y: {
-                 ticks: { color: "#c9d1d9" },
-                grid: { color: "rgba(201,209,217,0.08)" },
+            y: {
+               ticks: { color: "#c9d1d9" },
+               grid: { color: "rgba(201,209,217,0.08)" },
       },
     },
   };
 }
+
 
 
 
@@ -1153,19 +1174,30 @@
 
         posSelect.onchange = updateUIAfterPositionChange;
         // ✅ Compare DB player
-document.getElementById("compareDbBtn")?.addEventListener("click", async () => {
+        document.getElementById("compareDbBtn")?.addEventListener("click", async () => {
   const q = document.getElementById("compareDbInput")?.value?.trim();
-  if (!q) return;
+  if (!q) return alert("Type a player name first.");
 
   try {
     const hits = await safePost("/search_player", { player_name: q });
     const cmp = Array.isArray(hits) && hits[0] ? hits[0] : null;
     if (!cmp) return alert("No database match found.");
+
+    // ✅ If no primary player loaded yet, load this as the main player
+    if (!currentPrimaryPlayer) {
+      loadPlayerDetails(cmp);
+      switchTab("analytics");
+      alert("Loaded player. Now select another player and click Compare again to overlay.");
+      return;
+    }
+
     overlayComparison(cmp, "Database");
+    switchTab("analytics");
   } catch (e) {
     alert(String(e?.message || e));
   }
 });
+
 
 // ✅ Compare squad player
 document.getElementById("compareSquadBtn")?.addEventListener("click", () => {
@@ -1657,10 +1689,13 @@ function overlayComparison(comparePlayer, tag) {
     currentChart.data.datasets.push({
       label: `${comparePlayer.short_name || "Compare"} (${tag})`,
       data: compData,
-      borderWidth: 2,
+      borderWidth: 3,
       pointRadius: 3,
       fill: false,
+      borderColor: MS_YELLOW,
+      pointBackgroundColor: MS_YELLOW,
     });
+
 
     currentChart.update();
   }
@@ -1675,11 +1710,14 @@ function overlayComparison(comparePlayer, tag) {
       (ds) => !String(ds.label || "").includes(`Compare (${tag})`)
     );
 
-    benchmarkChart.data.datasets.push({
-      label: `Compare (${tag})`,
-      data: compVals,
-      borderWidth: 1,
+  benchmarkChart.data.datasets.push({
+    label: `Compare (${tag})`,
+    data: compVals,
+    borderWidth: 1,
+    backgroundColor: MS_YELLOW_SOFT,
+    borderColor: MS_YELLOW,
     });
+
 
     benchmarkChart.update();
   }
@@ -1694,9 +1732,26 @@ function overlayComparison(comparePlayer, tag) {
     );
 
     projectionChart.data.datasets.push(
-      { label: `Compare OVR (${tag})`, data: ovr, yAxisID: "y1", tension: 0.3, borderWidth: 2 },
-      { label: `Compare Value (€M) (${tag})`, data: val, yAxisID: "y2", tension: 0.3, borderWidth: 2 }
-    );
+  {
+    label: `Compare OVR (${tag})`,
+    data: ovr,
+    yAxisID: "y1",
+    tension: 0.3,
+    borderWidth: 3,
+    borderColor: MS_YELLOW,
+    pointBackgroundColor: MS_YELLOW,
+  },
+  {
+    label: `Compare Value (€M) (${tag})`,
+    data: val,
+    yAxisID: "y2",
+    tension: 0.3,
+    borderWidth: 3,
+    borderColor: "rgba(56,189,248,1)", // sky blue
+    pointBackgroundColor: "rgba(56,189,248,1)",
+  }
+);
+
 
     projectionChart.update();
   }
@@ -1785,21 +1840,55 @@ if (projectionChart) projectionChart.destroy();
 const pctx = document.getElementById("projectionChart")?.getContext("2d");
 
 if (pctx && proj.length) {
-  projectionChart = new Chart(pctx, {
-    type: "line",
-    data: {
+      projectionChart = new Chart(pctx, {
+      type: "line",
+      data: {
       labels: years,
       datasets: [
-        { label: "Projected Overall", data: ovr, yAxisID: "y1", tension: 0.3, borderWidth: 2 },
-        { label: "Projected Value (€M)", data: val, yAxisID: "y2", tension: 0.3, borderWidth: 2 }
+      {
+       label: "Projected Overall",
+       data: ovr,
+       yAxisID: "y1",
+      tension: 0.3,
+      borderWidth: 3,
+     borderColor: MS_GREEN,
+      backgroundColor: MS_GREEN_FILL,
+      pointBackgroundColor: MS_GREEN,
+     pointBorderColor: MS_GREEN,
+  },
+  {
+      label: "Projected Value (€M)",
+      data: val,
+      yAxisID: "y2",
+      tension: 0.3,
+      borderWidth: 3,
+      borderColor: "rgba(45,212,191,1)",       // teal
+       backgroundColor: "rgba(45,212,191,0.15)",
+       pointBackgroundColor: "rgba(45,212,191,1)",
+      pointBorderColor: "rgba(45,212,191,1)",
+  },
       ]
     },
     options: {
         ...chartTheme("Development Projection (Overall + Value)"),
     scales: {
-        x: { ticks: { color: "#c9d1d9" }, grid: { color: "rgba(201,209,217,0.08)" } },
-        y1: { position: "left", ticks: { color: "#c9d1d9" }, grid: { color: "rgba(201,209,217,0.08)" } },
-        y2: { position: "right", ticks: { color: "#c9d1d9" }, grid: { drawOnChartArea: false } }
+      scales: {
+      x: { ticks: { color: "#c9d1d9" }, grid: { color: "rgba(201,209,217,0.08)" } },
+     y1: {
+    position: "left",
+    ticks: { color: "#c9d1d9" },
+    grid: { color: "rgba(201,209,217,0.08)" },
+    suggestedMin: 40,
+    suggestedMax: 99
+  },
+   y2: {
+    position: "right",
+    ticks: { color: "#c9d1d9" },
+    grid: { drawOnChartArea: false },
+    suggestedMin: 0
+  }
+}
+
   }
 }
 
@@ -1826,10 +1915,30 @@ if (bctx) {
     data: {
       labels,
       datasets: [
-        { label: "Player", data: playerVals, borderWidth: 1 },
-        { label: "Pos Avg", data: avgVals, borderWidth: 1 },
-        { label: "Pos Elite", data: eliteVals, borderWidth: 1 }
-      ]
+  {
+    label: "Player",
+    data: playerVals,
+    borderWidth: 1,
+    backgroundColor: MS_GREEN_SOFT,
+    borderColor: MS_GREEN,
+  },
+  {
+    label: "Pos Avg",
+    data: avgVals,
+    borderWidth: 1,
+    backgroundColor: "rgba(148,163,184,0.35)",
+    borderColor: "rgba(148,163,184,0.8)",
+  },
+  {
+    label: "Pos Elite",
+    data: eliteVals,
+    borderWidth: 1,
+    backgroundColor: MS_YELLOW_SOFT,
+    borderColor: MS_YELLOW,
+  },
+]
+
+      
     },
     options: {
         ...chartTheme("Position Benchmark Comparison"),
