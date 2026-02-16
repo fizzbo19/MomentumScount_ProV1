@@ -668,6 +668,11 @@
       const MS_YELLOW = "rgba(250,204,21,1)";
       const MS_YELLOW_SOFT = "rgba(250,204,21,0.45)";
 
+      // ✅ Squad comparison colors (different from DB compare)
+      const MS_SQUAD = "rgba(56,189,248,1)";        // sky blue
+      const MS_SQUAD_SOFT = "rgba(56,189,248,0.35)";
+
+
 
       /* ------------- GLOBAL ELEMENTS ------------- */
       let posSelect,
@@ -1669,6 +1674,12 @@ function overlayComparison(comparePlayer, tag) {
   if (!currentPrimaryPlayer) return alert("Load a primary player first.");
 
   const b = comparePlayer.full_attributes || {};
+    // ✅ pick comparison colors by tag
+    const palette =
+    tag === "Squad"
+      ? { line: MS_SQUAD, fill: MS_SQUAD_SOFT, point: MS_SQUAD }
+      : { line: MS_YELLOW, fill: MS_YELLOW_SOFT, point: MS_YELLOW }; // default = Database
+
 
   // Radar overlay
   if (currentChart) {
@@ -1692,8 +1703,8 @@ function overlayComparison(comparePlayer, tag) {
       borderWidth: 3,
       pointRadius: 3,
       fill: false,
-      borderColor: MS_YELLOW,
-      pointBackgroundColor: MS_YELLOW,
+      borderColor: palette.line,
+      pointBackgroundColor: palette.point,
     });
 
 
@@ -1714,8 +1725,8 @@ function overlayComparison(comparePlayer, tag) {
     label: `Compare (${tag})`,
     data: compVals,
     borderWidth: 1,
-    backgroundColor: MS_YELLOW_SOFT,
-    borderColor: MS_YELLOW,
+    backgroundColor: palette.fill,
+    borderColor: palette.line,
     });
 
 
@@ -1738,8 +1749,8 @@ function overlayComparison(comparePlayer, tag) {
     yAxisID: "y1",
     tension: 0.3,
     borderWidth: 3,
-    borderColor: MS_YELLOW,
-    pointBackgroundColor: MS_YELLOW,
+    borderColor: palette.line,
+    pointBackgroundColor: palette.line,
   },
   {
     label: `Compare Value (€M) (${tag})`,
@@ -1747,8 +1758,8 @@ function overlayComparison(comparePlayer, tag) {
     yAxisID: "y2",
     tension: 0.3,
     borderWidth: 3,
-    borderColor: "rgba(56,189,248,1)", // sky blue
-    pointBackgroundColor: "rgba(56,189,248,1)",
+    borderColor: palette.line, 
+    pointBackgroundColor: palette.line,
   }
 );
 
@@ -2361,12 +2372,28 @@ if (targetBox) {
           setupEventListeners();
           handleLoadSavedTargets();
           checkPremiumStatus();
+
+          
           const compareBtn = document.getElementById("compareSquadBtn");
 if (compareBtn) {
   compareBtn.onclick = () => {
-    const sel = document.getElementById("compareSquadSelect");
-    const idx = sel ? Number(sel.value) : NaN;
-    const squadP = squadPlayersParsed?.[idx];
+    const idx = Number(document.getElementById("compareSquadSelect")?.value);
+    const r = squadPlayersParsed?.[idx];
+    if (!r) return alert("No squad player selected.");
+
+    const cmp = {
+      short_name: r.short_name || r.name || r.player || "Squad Player",
+      club_position: r.club_position || r.position || r.pos || "CM",
+      full_attributes: r,
+      projections: [], // squad csv usually won’t have projections
+      benchmarks: currentPrimaryPlayer?.benchmarks || {}
+    };
+
+    overlayComparison(cmp, "Squad");
+    switchTab("analytics");
+  
+
+
     if (!currentPrimaryPlayer || !squadP) return alert("Select a squad player first.");
 
     // overlay squad player onto radar chart
